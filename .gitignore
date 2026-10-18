@@ -1,0 +1,10 @@
+# simulation output
+sim/**/build/
+*.wdb
+*.vcd
+*.fst
+isim/
+fuse.log
+fuse.xmsgs
+isim.log
+xilinxsim.ini
