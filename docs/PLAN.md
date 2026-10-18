@@ -76,7 +76,7 @@ karabas-go-modules/
             kg_kempston_mouse.v kg_serial_mouse.v
             keymaps/            — таблицы ZX-матрицы, Amiga и т.д.
     ctl/    kg_soft_switches.v  — N 8-битных регистров, плоский выход + строб изменения
-    mem/    kg_dpram.v  kg_dpram_2clk.v  kg_fifo.v  kg_async_fifo.v
+    mem/    kg_fifo.v  kg_async_fifo.v  (dpram → kg_tdpram с одним клоком, двухклоковый — kg_tdpram)
             kg_spram.v  kg_sprom.v  kg_sdpram.v  kg_tdpram.v  kg_tdpram_asym.v  kg_dist_sdpram.v  kg_dist_spram.v
     clk/    kg_pll.v (PLL_BASE + BUFG)  kg_dcm.v (DCM_SP)  kg_pll_reset.v
     audio/  kg_pcm5102.v  kg_sigma_delta_dac.v  kg_audio_peaks.v  kg_audio_lpf.v
@@ -133,7 +133,7 @@ karabas-go-modules/
   - Мультиплексор FT812 (`ft_rgb/ft_sel`) выносится в `kg_video_mux`.
   - `hdmi_pll` получает параметры, а 10 версий превращаются в таблицу значений в ядрах.
 - **pcm5102** → `kg_pcm5102` с параметром делителя и сбросом. Сначала тестбенч на формат I2S, потом исправление индекса.
-- **dpram**: исправить размер массива, добавить `kg_dpram_2clk` (из pdp2026).
+- **dpram**: заменяется на `kg_tdpram` (тот же клок на оба порта; два клока, как в pdp2026, тоже он). Отдельный `kg_dpram` не нужен.
 - **fifo** → `kg_fifo` (уже на Verilog). Coregen-fifo заменить с проверкой ресурсов.
 - В общие уходят модули из nanomig:
   - `audio_peaks` (уровни для firmware нужны всем ядрам);
@@ -165,7 +165,7 @@ karabas-go-modules/
 
 **A. Исчезает само при переходе на общие модули:**
 - `queue` (24×512) → `kg_fifo` внутри `kg_mcu_link`;
-- `rtc` (SDP 256×8) → `kg_dpram` в `kg_mcu_rtc`;
+- `rtc` (SDP 256×8) → `kg_sdpram` в `kg_mcu_rtc`;
 - `osd_vram` (1K×16), `rom_font` (`osd_font.coe`), `rom_font2` (`icons.coe`) → `kg_osd_overlay`;
 - `pllx5` (DCM_SP ×5 для HDMI) → `kg_hdmi_top` / `hdmi_pll`.
 
@@ -205,7 +205,28 @@ karabas-go-modules/
    - Из nanomig перенесён только `tb_img`: `run_hid_sim` и `run_audio_sim` тестируют `hid_amiga.v` и `audio_filter.v`, которые пока остаются в ядре. Остальное — тесты ядра целиком.
    - Тест на иголки падает на линке остальных ядер (старый `spi_slave`, съём слова по `di_req`, без гейтинга `spi_ssel`) и проходит с любым из трёх исправлений nanomig. Глитч комбинационного `di_req` в RTL-симуляции не виден.
    - Фильтр CS (3 такта) пока в top ядра; тест на него появится вместе с `kg_mcu_link` (этап 3).
-2. **Переписать на Verilog листовые модули**: `spi_slave`, `burst_rx`, `dac`, `soft_switches`, `cursor`, `pix_doubler`, `overlay`. Эквивалентность проверять в смешанном ISim: один стимул на старый VHDL и новый Verilog, сравнение выходов по тактам.
+2. **Переписать на Verilog листовые модули**: `spi_slave`, `burst_rx`, `dac`, `soft_switches`, `cursor`, `pix_doubler`, `overlay`. Эквивалентность проверять в смешанном ISim: один стимул на старый VHDL и новый Verilog, сравнение выходов по тактам. *Сделано 2026-10-18.* Старые файлы остаются, пока ими собираются ядра.
+
+   Модули и проверка (`sim/eq`): каждый `kg_*` против старого, всё в iverilog через `ghdl --synth`, кроме `spi_slave` и `overlay` (ISim). XST отдельно, LUT / регистры:
+
+   | Старый → новый | XST: старый → новый |
+   |---|---|
+   | `spi_slave` → `kg_spi_slave` (режим 0, без отладочных портов) | 71 → 66 LUT, 89 FF (без репликации регистров) |
+   | `burst_rx` → `kg_burst_rx` | 128 → 129 LUT, 118 → 115 FF |
+   | `dac` → `kg_sigma_delta_dac` | 17 LUT, 18 FF |
+   | `pix_doubler` → `kg_pix_doubler` | 55 LUT, 53 FF |
+   | `overlay` → `kg_osd_overlay` | 312 → 301 LUT, 221 → 195 FF, без 37 защёлок |
+   | `soft_switches` (tsconf) → `kg_soft_switches` | 48 → 52 LUT, 31 FF |
+   | `cursor` (tsconf, profi, next, test) → `kg_cursor` | 34 LUT, 42 FF |
+   | `pcm5102` → `kg_pcm5102` (исправлен) | 58 → 48 LUT |
+   | `fifo` → `kg_fifo` (2^AW слов, `count`) | 87 → 41 LUT (24×512) |
+
+   Находки:
+   - **`overlay.vhd` читал символ и строку шрифта через защёлки** (процесс без клока). В `kg_osd_overlay` адреса комбинационные, атрибут и строка шрифта — регистры. Вывод совпадает потактно, кроме одной-двух ячеек в кадре, где переключился popup / overlay: старый держал адреса прежнего режима до своей фазы чтения. В ISim старая модель ещё и неточна (`font_word` нет в списке чувствительности).
+   - **`kg_pcm5102` передаёт бит 0.** Входы защёлкиваются в начале левого слова, din меняется только по спаду bck.
+   - **Варианты `soft_switches`.** pdp2026 и vt100 пишут регистр без сравнения с прежней командой, а vt100 вообще иной (сброс при команде 0). Их переводить отдельно.
+   - **Вариант `cursor` из pcxt** (накопление до чтения) остаётся в ядре.
+   - **Ошибка в самих тестах.** Статическая задача проверки, вызванная из нескольких процессов, в iverilog проверяла чужие аргументы. Все проверочные задачи теперь `automatic`; найдено мутацией.
 3. **mcu**: слои, декодеры, обёртка `kg_mcu`. Проверка против `mcu.vhd` nanomig, затем tsconf (PS/2, XT, UART) и rk86 / spec256 (IOCTL).
 4. **Перевод ядер по одному.** На железе каждый раз проверять загрузку ROM, OSD, клавиатуру, джойстики, HDMI со звуком. Порядок:
    1. nanomig;

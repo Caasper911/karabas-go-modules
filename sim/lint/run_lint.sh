@@ -8,12 +8,14 @@
 set -e
 cd "$(dirname "$0")/../.."
 STUBS=sim/lint/xilinx_stubs.v
+# the kg_* modules a module instantiates are found in these directories
+YDIRS=$(find rtl -type d | sed 's/^/-y /')
 fail=0
 
 top_of() { grep -m1 -oP '^\s*module\s+\K\w+' "$1"; }
 
 for f in $(find rtl -name 'kg_*.v' | sort); do
-	if ! out=$(verilator --lint-only -Wall -Wno-PINCONNECTEMPTY --top-module "$(top_of "$f")" "$f" $STUBS 2>&1); then
+	if ! out=$(verilator --lint-only -Wall -Wno-PINCONNECTEMPTY --top-module "$(top_of "$f")" $YDIRS "$f" $STUBS 2>&1); then
 		echo "$out" | grep -v '^%Error: Exiting'
 		fail=1
 	fi
