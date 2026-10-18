@@ -18,3 +18,5 @@ jobs:
         run: sim/mem/run_mem_sim.sh
       - name: Audio
         run: sim/audio/run_audio_sim.sh
+      - name: Verilog ports against the VHDL
+        run: sim/eq/run_eq.sh --no-isim

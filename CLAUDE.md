@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Shared FPGA modules for the Karabas Go / Mini / Mini G cores (`karabas-go-core-*`): Xilinx Spartan-6 XC6SLX25, ISE 14.7 (XST). The cores used to carry their own copies of these modules, which diverged (16 versions of `mcu.vhd` in 17 cores). This repository holds the one maintained version; the cores include it as a git submodule.
 
-Status: stage 1 of `docs/PLAN.md` (Russian; the analysis of the existing copies and the migration plan). Follow its stages; update the plan when a decision changes. The files in `rtl/` are still the nanomig versions, byte for byte, with their original module names; the `kg_` prefix comes with the rewrite of each module. karabas-go-core-nanomig is the first core that uses this repository (submodule `modules/`).
+Status: stage 2 of `docs/PLAN.md` done (Russian; the analysis of the existing copies and the migration plan); next is stage 3, the split of `mcu.vhd`. Follow its stages; update the plan when a decision changes. Two generations live side by side: the nanomig files with their original names (byte for byte, what the cores build today) and their `kg_*` Verilog ports, checked against them (`sim/eq`). A core moves to the `kg_*` modules when it is converted (stage 4); the old files go once no core uses them. karabas-go-core-nanomig is the first core that uses this repository (submodule `modules/`).
 
 How a core uses it: the submodule is at `<core>/modules` (relative URL `../karabas-go-modules.git`, so it follows the ssh or https remote of the core), and the core's XST `.prj` lists the files it needs with paths relative to its build directory (`"../modules/rtl/..."` from `src/`). Simulation scripts of the core that rewrite prj paths must handle `../modules/` as well.
 
@@ -20,12 +20,18 @@ The reference versions are those of `karabas-go-core-nanomig` (sibling directory
 
 ## Layout (see docs/PLAN.md section 3)
 
-Now: `rtl/mcu` (`mcu.vhd`, `spi_slave.vhd`, `burst_rx.vhd`, `img_sdc.v`), `rtl/mem` (`dpram.v`, `fifo.v`, and the coregen replacements `kg_spram`, `kg_sprom`, `kg_sdpram`, `kg_tdpram`, `kg_dist_sdpram`, `kg_dist_spram`), `rtl/clk` (`kg_pll`, `kg_dcm`), `rtl/audio` (`pcm5102.v`, `dac.vhd`, `audio_peaks.v`), `rtl/video/hdmi` (`zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd`), `rtl/video/osd` (`overlay.vhd`, `pix_doubler.vhd`); `sim/` (`lint`, `mem`, `audio`, `mcu`, `ipcore_eq`, `run_all.sh`); `tools/coe2hex.py`.
+Now (old file -> its `kg_*` replacement):
+- `rtl/mcu`: `mcu.vhd`, `spi_slave.vhd` -> `kg_spi_slave`, `burst_rx.vhd` -> `kg_burst_rx`, `img_sdc.v`.
+- `rtl/mem`: `dpram.v` (-> `kg_tdpram` with one clock), `fifo.v` -> `kg_fifo`; the coregen replacements `kg_spram`, `kg_sprom`, `kg_sdpram`, `kg_tdpram`, `kg_dist_sdpram`, `kg_dist_spram`.
+- `rtl/clk`: `kg_pll`, `kg_dcm`. `rtl/ctl`: `kg_soft_switches` (the `soft_switches.vhd` of the cores). `rtl/hid`: `kg_cursor` (their `cursor.vhd`).
+- `rtl/audio`: `pcm5102.v` -> `kg_pcm5102` (sends bit 0, see its header), `dac.vhd` -> `kg_sigma_delta_dac`, `audio_peaks.v`.
+- `rtl/video/hdmi`: `zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd` (third-party VHDL, kept). `rtl/video/osd`: `overlay.vhd` -> `kg_osd_overlay`, `pix_doubler.vhd` -> `kg_pix_doubler`.
+- `sim/` (`lint`, `mem`, `audio`, `eq`, `mcu`, `ipcore_eq`, `run_all.sh`); `tools/coe2hex.py`.
 
 Planned:
 
 - `rtl/mcu`: the MCU link (`kg_mcu_link`), the per-feature command decoders and the compatibility wrapper `kg_mcu`.
-- `rtl/hid`, `rtl/ctl`, `rtl/mem`, `rtl/clk`, `rtl/audio`, `rtl/video/{hdmi,osd}`: the other shared modules.
+- `rtl/hid`: the keyboard and joystick decoders (`kg_hid_keys`, `kg_joy_map`), `kg_usb_ps2`; `rtl/audio`: `kg_audio_lpf`; `rtl/video/hdmi`: `kg_hdmi_top`.
 - `boards/{go,mini,minig}`: pin constraints (`pins.ucf`, LOC/IOSTANDARD only) per board.
 - `prj/kg_modules.prj`: the source list a core's build script appends to its own prj.
 - `tools/`: `coe2hex.py` and other helpers.
@@ -42,16 +48,20 @@ Planned:
 
 ## Verifying a change
 
-`sim/run_all.sh` runs every test (under a minute); each test prints `<tb>: 0 errors`. The CI (`.github/workflows/sim.yml`) runs the ones without ISE: lint, memories, audio. Tools: verilator, iverilog, ghdl (system packages), ISE 14.7 in `/opt/Xilinx/14.7` for ISim. If a tool is missing, ask the user to install it.
+`sim/run_all.sh` runs every test (about three minutes); each test prints `<tb>: 0 errors`. The CI (`.github/workflows/sim.yml`) runs the ones without ISE: lint, memories, audio, the `sim/eq` comparisons that go through ghdl. Tools: verilator, iverilog, ghdl (system packages), ISE 14.7 in `/opt/Xilinx/14.7` for ISim. If a tool is missing, ask the user to install it.
 
 - `sim/lint/run_lint.sh`: verilator `-Wall` on the `kg_*.v` files (no warning allowed), verilator on the imported Verilog (errors fail, warnings are listed), ghdl analysis of the VHDL (`ghdl_check.py`: VHDL-93 or 2008, ISE takes constructs of both; `spi_slave.vhd` only as its entity, ghdl rejects its case choices). Xilinx primitives and the VHDL entities used from Verilog are black boxes (`xilinx_stubs.v`, `unisim_stubs.vhd`).
 - `sim/mem/run_mem_sim.sh` (iverilog): the `kg_*` memories, `dpram.v` and `fifo.v` against the model in `tb_mem.v`, random stimulus, every output after every edge.
-- `sim/audio/run_audio_sim.sh` (iverilog): `tb_pcm5102.v` decodes the I2S stream (bits 15..1 only, see its header: bit 0 is never sent), `tb_audio_peaks.v` the frames of the level meters.
+- `sim/audio/run_audio_sim.sh` (iverilog): `tb_pcm5102.v` decodes the I2S stream (of `pcm5102.v` bits 15..1 only, bit 0 is never sent; of `kg_pcm5102` all 16 bits, whole frames, din changing with the falling bck), `tb_audio_peaks.v` the frames of the level meters.
+- `sim/eq/run_eq.sh`: each `kg_*` port against the old module, the same random stimulus, every output after every clock (`eq_check.vh`; an old output still X, a VHDL signal without initial value, is not compared). iverilog with the VHDL turned into a netlist by `ghdl --synth` (dac, pix_doubler, burst_rx, soft_switches and cursor of other cores, copied to `sim/eq/ref`), ISim for `spi_slave` (ghdl rejects it) and `overlay` (latches; a cell after a popup / overlay switch is not compared, see `kg_osd_overlay.v`). A rewrite of another module gets its testbench here.
 - `sim/mcu/run_mcu_sim.sh` (ISim): `tb_mem.v` with the VHDL models `dpram_sim.vhd` / `fifo_sim.vhd` (ISim cannot elaborate the Verilog ones from VHDL with open ports), `tb_mcu.v` (every command of `mcu.vhd`, the reply queue, loaders classic and burst, rtc, CAPS, spikes on `MCU_SS` during bursts), `tb_img.v` (the file mounter). The spike test fails with the link of the other cores (old `spi_slave`, a reply word taken on `di_req`, no `spi_ssel` gating) and passes with any one of the three fixes; the glitch of the combinational `di_req` is not visible in RTL simulation.
 - `sim/ipcore_eq/run_ipcore_eq.sh` (ISim, needs the sibling cores): the `kg_*` memories and clocks against the coregen cores they replace (models from `$XILINX/verilog/src/XilinxCoreLib`, which ISE has as source only). Memories: random stimulus, every output every clock; clocks: every edge. When a core replaces another coregen core, add the pair there first.
 - The coregen models zero their memories and outputs; the `kg_*` memories do the same in simulation (a loop hidden from XST by `translate_off`, as XST limits loop iterations) and XST starts the block RAMs at 0, so both match on the FPGA.
-- A test is only worth something if it fails without the code it covers: break the module in a scratch copy (`cp -r rtl sim` elsewhere, edit, run the script there) and see the test fail.
+- A test is only worth something if it fails without the code it covers: break the module in a scratch copy (`cp -r rtl sim` elsewhere, edit, run the script there, one copy per run) and see the test fail.
+- A checking task called from more than one process must be `task automatic`: iverilog may switch threads after the arguments of a static task are set, and a call then checks the arguments of another (this hid every error of `upd` in `tb_eq_soft_switches` until it was found by a mutation).
+- Inputs of a testbench for a VHDL and a Verilog module change at the falling clock: a change at the rising edge reaches the processes of the two languages in a different order in ISim.
+- A VHDL signal without an initial value is U in ISim; an `isim force` that ends lets it fall back to its U driver, so hold the force (`tb_eq_overlay`).
 - Check what XST infers ("Advanced HDL Synthesis Report" of the `.syr`: block or distributed RAM, size, write-first / read-first) and the RAMB16 / RAMB8 count against the coregen build.
-- A rewrite of an existing module is checked against the old one with the same stimulus, output by output, clock by clock (mixed ISim for VHDL / Verilog).
+- A rewrite of an existing module is checked against the old one with the same stimulus, output by output, clock by clock (`sim/eq`), and synthesized alone against it with XST (LUTs, registers; `-iobuf NO`). A register that has an initial value other than its asynchronous reset value costs XST latches, and any initial value can keep it from inferring an accumulator (`kg_sigma_delta_dac`).
 - Build at least one core that uses the module and compare utilization (`*_map.mrp`) and timing (`*.par`, "All constraints were met") with the build before the change.
 - Changes to the MCU link need a check on hardware with the firmware: rom loading, OSD, keyboard, joysticks, file mounter.

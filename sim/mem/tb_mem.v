@@ -5,7 +5,8 @@
 // - kg_spram (write-first and read-first), kg_sprom (INIT_FILE rom.hex), kg_sdpram,
 //   kg_tdpram (WE_W 1 and 4, two clocks), kg_dist_sdpram, kg_dist_spram (DEPTH below 2^AW);
 // - dpram (both ports on one clock, write-first);
-// - fifo (the queue to the mcu in mcu.vhd: dout registered on rd, full one entry early).
+// - fifo (the queue to the mcu in mcu.vhd: dout registered on rd, full one entry early);
+// - kg_fifo (2^AW entries, count).
 // A port of a dual port memory reading the address the other port writes at the same edge:
 // the block RAM gives an undefined word (collision); not checked for dpram, whose ports share a
 // clock. The kg_* memories on two clocks give the old word in simulation, as the model.
@@ -25,7 +26,8 @@ integer errors = 0;
 integer checks = 0;
 integer seed = 1;
 
-task check(input [255:0] name, input [31:0] got, input [31:0] exp);
+// automatic: called from the processes of both clocks (see sim/eq/eq_check.vh)
+task automatic check(input [255:0] name, input [31:0] got, input [31:0] exp);
 	begin
 		checks = checks + 1;
 		if (^exp !== 1'bx && got !== exp) begin
@@ -205,6 +207,33 @@ always @(posedge clka)
 		end
 	end
 
+// ---------------- kg_fifo: the same stimulus, 16 entries ----------------
+
+wire [11:0] kf_dout;
+wire kf_full, kf_empty;
+wire [4:0] kf_count;
+reg [11:0] kf_q [0:15];
+integer kf_n = 0, kf_rp = 0, kf_wp = 0, kf_n0;
+reg [11:0] kf_exp;
+kg_fifo #(.DW(12), .AW(4)) u_kf(
+	.clk(clka), .reset(fifo_rst), .wr(ff_wr), .din(ra[31:20]), .full(kf_full),
+	.rd(ff_rd), .dout(kf_dout), .empty(kf_empty), .count(kf_count)
+);
+always @(posedge clka)
+	if (!fifo_rst) begin
+		kf_n0 = kf_n;
+		if (ff_rd && kf_n0 > 0) begin
+			kf_exp <= kf_q[kf_rp];
+			kf_rp = (kf_rp + 1) % 16;
+			kf_n = kf_n - 1;
+		end
+		if (ff_wr && kf_n0 < 16) begin
+			kf_q[kf_wp] = ra[31:20];
+			kf_wp = (kf_wp + 1) % 16;
+			kf_n = kf_n + 1;
+		end
+	end
+
 // ---------------- checks ----------------
 
 reg started = 1'b0;
@@ -226,6 +255,10 @@ always @(negedge clka) if (started) begin
 		check("fifo data_count", ff_count, ff_n);
 `endif
 		check("fifo dout", ff_dout, ff_exp);
+		check("kg_fifo empty", kf_empty, kf_n == 0);
+		check("kg_fifo full", kf_full, kf_n == 16);
+		check("kg_fifo count", kf_count, kf_n);
+		check("kg_fifo dout", kf_dout, kf_exp);
 	end
 end
 always @(negedge clkb) if (started) begin
@@ -244,6 +277,7 @@ initial begin
 	for (i = 0; i < 64; i = i + 1) dsd_mem[i] = 0;
 	for (i = 0; i < 320; i = i + 1) dsp_mem[i] = 0;
 	ff_exp = 12'bx;
+	kf_exp = 12'bx;
 `ifndef VHDL_MODELS
 	for (i = 0; i < 256; i = i + 1) u_dp.mem[i] = 0;
 `endif

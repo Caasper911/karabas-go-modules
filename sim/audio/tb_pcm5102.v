@@ -16,11 +16,17 @@
 // - the registers are loaded during the last slot of the right word: on a sample change, bit 1
 //   of the right word goes from the old to the new sample together with the rising bck.
 // STRICT = 1 checks all 16 bits, for a fixed module.
+// `define KG_PCM5102: kg_pcm5102.v, strict, and every frame: the frame in which the inputs
+// change carries the pair before (taken at the start of the left word), the next ones the new.
 // Ends with "tb_pcm5102: N errors".
 
 module tb_pcm5102;
 
+`ifdef KG_PCM5102
+parameter STRICT = 1;
+`else
 parameter STRICT = 0;
+`endif
 parameter PAIRS = 40;
 
 reg clk = 1'b0;
@@ -30,7 +36,11 @@ reg reset = 1'b1;
 reg [15:0] left = 16'd0, right = 16'd0;
 wire din, bck, lrck;
 
+`ifdef KG_PCM5102
+kg_pcm5102 #(.DIV_BITS(1)) dut(
+`else
 PCM5102 #(.DAC_CLK_DIV_BITS(1)) dut(
+`endif
 	.clk(clk), .reset(reset), .left(left), .right(right), .din(din), .bck(bck), .lrck(lrck)
 );
 
@@ -62,6 +72,13 @@ end
 
 reg din_lo;
 always @(negedge clk) if (!bck) din_lo <= din;
+`ifdef KG_PCM5102
+// din changes with the falling bck only
+always @(posedge bck) #1 if (n_bck > 2 && din !== din_lo) begin
+	if (errors < 10) $display("%t ERROR: din changed with the rising bck", $time);
+	errors = errors + 1;
+end
+`endif
 
 reg lr_prev = 1'b1;
 integer slot = 0;
@@ -84,7 +101,7 @@ end
 
 // ---------------- stimulus and check ----------------
 
-reg [15:0] mask;
+reg [15:0] mask, prev_l, prev_r, exp_l, exp_r;
 integer p, f, seed = 7;
 initial begin
 	mask = STRICT ? 16'hFFFF : 16'hFFFE;
@@ -93,6 +110,8 @@ initial begin
 	for (p = 0; p < PAIRS; p = p + 1) begin
 		@(negedge lrck); // a new frame: change the inputs in the middle of its left word
 		repeat (64) @(posedge clk);
+		prev_l = left;
+		prev_r = right;
 		left = $random(seed);
 		right = $random(seed);
 		if (p == 0) begin left = 16'h8001; right = 16'h7FFE; end
@@ -103,13 +122,15 @@ initial begin
 			@(negedge lrck);
 			@(posedge bck);
 			@(posedge bck);
-			if (f >= 2 && p > 0) begin
-				if ((word_l & mask) !== (left & mask)) begin
-					if (errors < 10) $display("%t ERROR: left %h, sent %h", $time, word_l, left);
+			exp_l = (f == 0) ? prev_l : left;
+			exp_r = (f == 0) ? prev_r : right;
+			if (p > 0 && (f >= 2 || (`ifdef KG_PCM5102 1 `else 0 `endif))) begin
+				if ((word_l & mask) !== (exp_l & mask)) begin
+					if (errors < 10) $display("%t ERROR: frame %0d left %h, sent %h", $time, f, word_l, exp_l);
 					errors = errors + 1;
 				end
-				if ((word_r & mask) !== (right & mask)) begin
-					if (errors < 10) $display("%t ERROR: right %h, sent %h", $time, word_r, right);
+				if ((word_r & mask) !== (exp_r & mask)) begin
+					if (errors < 10) $display("%t ERROR: frame %0d right %h, sent %h", $time, f, word_r, exp_r);
 					errors = errors + 1;
 				end
 			end
