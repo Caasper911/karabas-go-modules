@@ -20,7 +20,7 @@ The reference versions are those of `karabas-go-core-nanomig` (sibling directory
 
 ## Layout (see docs/PLAN.md section 3)
 
-Now: `rtl/mcu` (`mcu.vhd`, `spi_slave.vhd`, `burst_rx.vhd`, `img_sdc.v`), `rtl/mem` (`dpram.v`, `fifo.v`), `rtl/audio` (`pcm5102.v`, `dac.vhd`, `audio_peaks.v`), `rtl/video/hdmi` (`zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd`), `rtl/video/osd` (`overlay.vhd`, `pix_doubler.vhd`).
+Now: `rtl/mcu` (`mcu.vhd`, `spi_slave.vhd`, `burst_rx.vhd`, `img_sdc.v`), `rtl/mem` (`dpram.v`, `fifo.v`, and the coregen replacements `kg_spram`, `kg_sprom`, `kg_sdpram`, `kg_tdpram`, `kg_dist_sdpram`, `kg_dist_spram`), `rtl/clk` (`kg_pll`, `kg_dcm`), `rtl/audio` (`pcm5102.v`, `dac.vhd`, `audio_peaks.v`), `rtl/video/hdmi` (`zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd`), `rtl/video/osd` (`overlay.vhd`, `pix_doubler.vhd`).
 
 Planned:
 
@@ -42,6 +42,10 @@ Planned:
 - Commit messages explain why a change was needed and what it costs or changes in behaviour (latency, LUT counts before and after), and say "No functional change." when that is the case.
 
 ## Verifying a change
+
+- `sim/ipcore_eq/run_ipcore_eq.sh` (ISim, ~20 s): the `kg_*` memories and clocks against the coregen cores they replace, from the `ipcore_dir` of the sibling cores (models from `$XILINX/verilog/src/XilinxCoreLib`, which ISE has as source only). Memories: random stimulus, every output every clock; clocks: every edge. Both must print `0 errors`. When a core replaces another coregen core, add the pair there first.
+- The coregen models zero their memories and outputs; the `kg_*` memories do the same in simulation (a loop hidden from XST by `translate_off`, as XST limits loop iterations) and XST starts the block RAMs at 0, so both match on the FPGA.
+- Check what XST infers ("Advanced HDL Synthesis Report" of the `.syr`: block or distributed RAM, size, write-first / read-first) and the RAMB16 / RAMB8 count against the coregen build.
 
 - Simulate the module (ISim for mixed VHDL/Verilog; iverilog / verilator lint for pure Verilog). A rewrite of an existing module is checked against the old one with the same stimulus, output by output, clock by clock.
 - Build at least one core that uses the module and compare utilization (`*_map.mrp`) and timing (`*.par`, "All constraints were met") with the build before the change.
