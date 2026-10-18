@@ -1,0 +1,20 @@
+# Lint and the simulations that need no ISE (sim/run_all.sh runs the ISim ones as well).
+name: sim
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sim:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends iverilog verilator ghdl
+      - name: Lint
+        run: sim/lint/run_lint.sh
+      - name: Memories
+        run: sim/mem/run_mem_sim.sh
+      - name: Audio
+        run: sim/audio/run_audio_sim.sh

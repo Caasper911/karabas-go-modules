@@ -13,6 +13,8 @@ The cores include this repository as a git submodule in `modules/` and list the 
 | `rtl/video/hdmi` | `zhdmi_top.v` and the zhdmi HDMI transmitter, `hdmi_pll.v`, `dvi*.vhd` |
 | `rtl/video/osd` | `overlay.vhd` (OSD menus of the MCU), `pix_doubler.vhd` |
 
-`tools/coe2hex.py` converts a coregen `.coe` into the `$readmemh` file of the `INIT_FILE` parameters. `sim/ipcore_eq/run_ipcore_eq.sh` simulates the `kg_*` memories and clocks against the coregen cores they replace (needs the sibling core repositories).
+`tools/coe2hex.py` converts a coregen `.coe` into the `$readmemh` file of the `INIT_FILE` parameters.
+
+Tests: `sim/run_all.sh` (lint with verilator and ghdl, the memories and audio modules with Icarus Verilog; with ISE 14.7 also the MCU link against a model of the firmware and the `kg_*` modules against the coregen cores they replace). The CI runs the part without ISE.
 
 The modules came from [karabas-go-core-nanomig](https://github.com/andykarpov/karabas-go-core-nanomig), whose MCU link has the latest fixes. The plan for the other cores and the next steps (Verilog rewrite, split of `mcu`, removal of the coregen cores) is in [docs/PLAN.md](docs/PLAN.md).

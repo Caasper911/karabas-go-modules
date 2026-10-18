@@ -44,7 +44,10 @@ genvar l;
 generate
 	for (l = 0; l < WE_W; l = l + 1) begin : kg_tdpram_lane
 
+		// written from both clocks: the two ports of the block RAM
+		/* verilator lint_off MULTIDRIVEN */
 		reg [LW-1:0] mem [0:(1<<AW)-1];
+		/* verilator lint_on MULTIDRIVEN */
 		reg [LW-1:0] qa, qb;
 		assign douta[l*LW +: LW] = qa;
 		assign doutb[l*LW +: LW] = qb;
