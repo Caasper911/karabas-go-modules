@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Shared FPGA modules for the Karabas Go / Mini / Mini G cores (`karabas-go-core-*`): Xilinx Spartan-6 XC6SLX25, ISE 14.7 (XST). The cores used to carry their own copies of these modules, which diverged (16 versions of `mcu.vhd` in 17 cores). This repository holds the one maintained version; the cores include it as a git submodule.
 
-Status: just created, no RTL yet. The analysis of the existing copies and the migration plan are in `docs/PLAN.md` (Russian). Follow its stages; update the plan when a decision changes.
+Status: stage 0 of `docs/PLAN.md` (Russian; the analysis of the existing copies and the migration plan). Follow its stages; update the plan when a decision changes. The files in `rtl/` are still the nanomig versions, byte for byte, with their original module names; the `kg_` prefix comes with the rewrite of each module. karabas-go-core-nanomig is the first core that uses this repository (submodule `modules/`).
+
+How a core uses it: the submodule is at `<core>/modules` (relative URL `../karabas-go-modules.git`, so it follows the ssh or https remote of the core), and the core's XST `.prj` lists the files it needs with paths relative to its build directory (`"../modules/rtl/..."` from `src/`). Simulation scripts of the core that rewrite prj paths must handle `../modules/` as well.
 
 The reference versions are those of `karabas-go-core-nanomig` (sibling directory `../karabas-go-core-nanomig`): its MCU link has the reliability fixes (chip select deglitch, `spi_ssel` gated during bursts, reply words popped on `do_valid`, no `di_req` in idle in `spi_slave`) that no other core has yet. Its `CLAUDE.md` documents why each of them was needed.
 
@@ -16,7 +18,11 @@ The reference versions are those of `karabas-go-core-nanomig` (sibling directory
 - `karabas-go-firmware`: the MCU side of the link. `src/config.h` has the command codes, `docs/protocol.md` and `docs/burst_protocol.md` the protocol. A change of the link here has to match it.
 - `karabas-go-tools`: `make_core.py` (packs the bitstream and ROMs into `.kg1/.kg2/.kg3`).
 
-## Layout (planned, see docs/PLAN.md section 3)
+## Layout (see docs/PLAN.md section 3)
+
+Now: `rtl/mcu` (`mcu.vhd`, `spi_slave.vhd`, `burst_rx.vhd`, `img_sdc.v`), `rtl/mem` (`dpram.v`, `fifo.v`), `rtl/audio` (`pcm5102.v`, `dac.vhd`, `audio_peaks.v`), `rtl/video/hdmi` (`zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd`), `rtl/video/osd` (`overlay.vhd`, `pix_doubler.vhd`).
+
+Planned:
 
 - `rtl/mcu`: the MCU link (`kg_mcu_link`), the per-feature command decoders and the compatibility wrapper `kg_mcu`.
 - `rtl/hid`, `rtl/ctl`, `rtl/mem`, `rtl/clk`, `rtl/audio`, `rtl/video/{hdmi,osd}`: the other shared modules.

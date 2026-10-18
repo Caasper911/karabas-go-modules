@@ -92,7 +92,7 @@ karabas-go-modules/
 ### Подключение к ядрам
 
 - Git submodule в `<core>/modules`: каждое ядро зафиксировано на своём коммите, сборки воспроизводимы. Соседний checkout через symlink (как сейчас с karabas-go-tools в nanomig) для RTL не годится.
-- XST-prj не умеет include. `build_*.sh` склеивает `core.prj` и `modules/prj/kg_modules.prj`, подставляя префикс пути.
+- XST-prj не умеет include. Решено на этапе 0: ядро перечисляет нужные файлы в своём prj с путями `"../modules/rtl/..."`. Наборы файлов у плат разные (Go без HDMI), а явный список проще, чем склейка фрагментов. `prj/kg_modules.prj` — только справочный список.
 - В `.xise` пути относительные (`../modules/rtl/...`).
 - ngdbuild принимает несколько `-uc`: `modules/boards/<board>/pins.ucf` плюс `timing.ucf` самого ядра.
 
