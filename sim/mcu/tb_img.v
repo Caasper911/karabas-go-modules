@@ -5,7 +5,7 @@
 // - mount slot 0 (901120 bytes): sdc_img_mounted[0] with the size;
 // - read sector 5 with classic frames, then sector 6 with a burst: the requester gets the bytes;
 // - write sector 7: the mcu model gets the 512 bytes of the requester.
-// Ends with "tb_img: N errors".
+// Ends with "tb_img: N errors". `define KG_MCU: kg_mcu.v in place of mcu.vhd.
 
 module tb_img;
 
@@ -57,7 +57,14 @@ wire img_data_wr, img_result_wr, img_q_wr, img_q_ack;
 wire [8:0] img_data_addr;
 wire [23:0] img_q_di;
 
+`ifdef KG_MCU
+// kg_mcu with the nanomig configuration, its chip select filter on
+kg_mcu #(.BURST_MAX_MHZ(32), .CS_FILTER(3), .ENABLE_IMG(1)) mcu(
+	.UART_TX_MODE(1'b0), .UART_DLM(8'h00), .UART_DLL(8'h00), .UART_DLM_WR(1'b0), .UART_DLL_WR(1'b0),
+	.DEBUG_ADDR(16'h0000), .DEBUG_DATA(16'h0000),
+`else
 mcu #(.BURST_MAX_MHZ(32)) mcu(
+`endif
 	.CLK(clk),
 	.N_RESET(1'b1),
 	.MCU_MOSI(mosi),
