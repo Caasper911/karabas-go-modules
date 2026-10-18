@@ -13,7 +13,7 @@
 //   lose no reply word;
 // - MISO / SCK / MOSI / CS of the FT812 and SD2 chip selects, N_RESET of the queue.
 // A frame shifts the reply word the core popped after the previous frame. Ends with
-// "tb_mcu: N errors".
+// "tb_mcu: N errors". `define KG_MCU: kg_mcu.v in place of mcu.vhd.
 
 module tb_mcu;
 
@@ -59,7 +59,14 @@ wire [31:0] romload_addr;
 wire ft_sck, ft_mosi, ft_cs_n, sd2_sck, sd2_mosi, sd2_cs_n;
 wire img_q_ack, img_phys_wr;
 
+`ifdef KG_MCU
+// kg_mcu with the nanomig configuration, its chip select filter on
+kg_mcu #(.BURST_MAX_MHZ(32), .CS_FILTER(3), .ENABLE_IMG(1)) dut(
+	.UART_TX_MODE(1'b0), .UART_DLM(8'h00), .UART_DLL(8'h00), .UART_DLM_WR(1'b0), .UART_DLL_WR(1'b0),
+	.DEBUG_ADDR(16'h0000), .DEBUG_DATA(16'h0000),
+`else
 mcu #(.BURST_MAX_MHZ(32)) dut(
+`endif
 	.CLK(clk),
 	.N_RESET(n_reset),
 	.MCU_MOSI(mosi), .MCU_MISO(miso), .MCU_SCK(sck), .MCU_SS(cs_n),
