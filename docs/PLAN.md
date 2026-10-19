@@ -156,7 +156,7 @@ karabas-go-modules/
 | pdp2026 | `pll`, `bootrom`, `ledfont` (ROM, coe), `sectorbuf` (TDP 256×16) | `pdp2011.v`, `sdspi.v`, `icons.v` |
 | next | `queue`, `rtc`, `pll_midi` (DCM), `sdpbram_16k_8` (ENB), distributed `sdpram_128_8`, `sdpram_16_9`, `sdpram_64_9`, `spram_320_9`, `keyjoy_sdpram_64_6` (coe) | `mcu.vhd`, `zxnext/video/*`, `uart.vhd`, `membrane_stick.vhd` |
 | next186 | `dcm`, `dcm_dsp`, `cache` (TDP 32×4096, ENB), `DAC_SRAM` (TDP 8/32), `datamem16` (SDP 32/16), `instrmem`, `sr_font` (coe), async FIFO `fifo` (16→32), `sndfifo` (32×4096, счётчики), `qdsp` (17×16 distributed) | `ddr_186.v`, `DSP32.v`, `vga.v`, `soundwave.v`, `cache_controller.v` |
-| baseconf | `fifo`, `fifo2`, `osd_vram`, `pll`, `queue`, `rom_font`, `rtc` — только в устаревших `karabas_go_top.prj` / `karabas_mini_top.prj` | `ipcore_dir` нет, RTL уже на своём `fifo.v`. Вычистить prj. |
+| baseconf | `fifo`, `fifo2`, `osd_vram`, `pll`, `queue`, `rom_font`, `rtc` — только в устаревших `karabas_go_top.prj` / `karabas_mini_top.prj` | `ipcore_dir` нет, RTL уже на своём `fifo.v`. Вычистить prj. Ядра пока нет, см. этап 4 п. 4. |
 
 В сборке без ipcore: nanomig, profi, tsconf, menu, spec256, sdram-test. В profi остался неиспользуемый `ipcore_dir`.
 
@@ -294,7 +294,7 @@ karabas-go-modules/
       - `kg_pll` перед BUFGMUX / BUFGCE: биты `BUFG_MASK` в 0 (иначе каскад BUFG → BUFGMUX вне выделенной трассировки, в Go стоял `CLOCK_DEDICATED_ROUTE = FALSE`). Из VHDL `BUFG_MASK` передаётся целым числом.
       - Клоки из логики и защёлки ищутся в «Clock Information» `.syr`. XST молча выбрасывает вторую ветку `elsif x'event` (у profi так терялся старший байт Nemo IDE).
       - Сети выходов PLL без BUFG называются по сигналу верхнего уровня (`U1/U1/pll_clk<0>`), а не `.../clkout<0>`: имена для TNM_NET проверять ngdbuild.
-   3. tsconf — *сделано 2026-10-19, ждёт проверки на железе* (ветка `kg-modules` ядра, сборка 26101917). На `kg_*`: `mcu` → `kg_mcu` (PS/2, XT, UART, RTC; matrix на Mini G, burst 32 МГц на Mini G), `soft_switches`, `cursor`, `overlay` → `kg_osd_overlay`, `dpram` / `fifo` / rom → `kg_sdpram` / `kg_fifo`, `pcm5102`, `dac` → `kg_sigma_delta_dac`, `pll` → `kg_pll`, HDMI → zhdmi из modules (на Mini / Mini G около 900 LUT больше прежнего кодера, решено оставить). `.xise` удалены, сборка через `src/Makefile`. Новый модуль `kg_async_fifo`. Один блок констрейнтов в трёх ucf: PERIOD на CLK_50MHZ, `TS_CLK_MCU` 32 МГц, FROM-TO DATAPATHONLY на асинхронных переходах (MCU_SCK, clk_8 FDC, FT_CLK, ESP32 I2S), SRAM 12 + 12 нс, свой PERIOD 64 МГц на пиксельный клок FT. Все констрейнты выполнены на трёх платах, на Mini / Mini G и во втором прогоне trce для режима ядра (`make <board>-coremode`).
+   3. tsconf — *сделано и проверено на железе 2026-10-19* (сборка 26101918). На `kg_*`: `mcu` → `kg_mcu` (PS/2, XT, UART, RTC; matrix на Mini G, burst 32 МГц на Mini G), `soft_switches`, `cursor`, `overlay` → `kg_osd_overlay`, `dpram` / `fifo` / rom → `kg_sdpram` / `kg_fifo`, `pcm5102`, `dac` → `kg_sigma_delta_dac`, `pll` → `kg_pll`, HDMI → zhdmi из modules (на Mini / Mini G около 900 LUT больше прежнего кодера, решено оставить). `.xise` удалены, сборка через `src/Makefile`. Новый модуль `kg_async_fifo`. Один блок констрейнтов в трёх ucf: PERIOD на CLK_50MHZ, `TS_CLK_MCU` 32 МГц, FROM-TO DATAPATHONLY на асинхронных переходах (MCU_SCK, clk_8 FDC, FT_CLK, ESP32 I2S), SRAM 12 + 12 нс, свой PERIOD 64 МГц на пиксельный клок FT. Все констрейнты выполнены на трёх платах, на Mini / Mini G и во втором прогоне trce для режима ядра (`make <board>-coremode`).
 
       | Плата | LUT master → после | Slices | Score с реальными констрейнтами, master → после |
       |---|---|---|---|
@@ -312,7 +312,9 @@ karabas-go-modules/
       - BUFGCE на clk_bus (`U_BUFG` в tsconf.v) прятал соотношение clk_sys ↔ clk_bus: заменён на CE от `bus_ce.v`.
       - `audio_samplerate.v` (в `zhdmi_top.v` modules) переключает `clk_audio` раз в `prescaler + 2` тактов, а строб даёт только на фронте: частота отсчётов fs/2. tsconf его больше не использует; ядрам с `zhdmi_top` (nanomig, profi) проверить на железе.
       - Клоки из логики и защёлки: `zclk` в zports, триггеры IDE, SAA1099, /RAWREAD FDC, `palsel` / `hint_beg` (начальное значение, отличное от значения сброса). `volTable` ym2149 в «Clock Information» — ROM, артефакт отчёта XST.
-   4. baseconf;
+      - `usb_ps2_keybuf.v` (сканкоды PS/2 через регистры RTC F0..FF, их читает Wild Commander) обнулял `keybuf_di` до записи в буфер и писал 00. Старый `mcu.vhd` переключал `KB_SCANCODE_UPD` дважды за кадр и прятал это, `kg_mcu` переключает один раз. При переходе на `kg_mcu` проверять копии этого файла в других ядрах (тест `tb_kbd_rtc` tsconf).
+      - Mini: путь zhdmi 5x клок → OSERDES не сошёлся на 0,21 нс из-за размещения (без логики, 5,4 нс трассы). cost table map задаётся на плату (`MAP_T_<board>` в Makefile), у Mini 2.
+   4. baseconf — *пропустить*: ядра baseconf ещё нет, то, что лежит в файловой системе (`karabas-go-core-baseconf`), пока игнорировать. Упоминания baseconf в этом плане относятся к нему же;
    5. test, pcxt, vt100 (в основном ipcore группы A);
    6. alf, alf128, nes, rk86 (исправления линка + ipcore A, B, PLL);
    7. menu (загрузчик, рисковать им в последнюю очередь);
