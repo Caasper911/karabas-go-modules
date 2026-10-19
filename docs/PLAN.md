@@ -182,7 +182,7 @@ karabas-go-modules/
 
 **C. Сложные случаи (next186):**
 - Асимметричная ширина (`DAC_SRAM` 8/32, `datamem16` 32/16): память на широкое слово с byte-enable и мультиплексором. Если не уложится — явный `RAMB16BWER` в `kg_tdpram_asym`.
-- Async FIFO (`fifo` 16→32, `sndfifo`, `qdsp`): `kg_async_fifo` с Gray-указателями, соотношением ширин и счётчиками rd/wr, плюс TIG/DATAPATHONLY на синхронизаторы. Обязательны тестбенч с разными частотами и проверка на железе.
+- Async FIFO (`fifo` 16→32, `sndfifo`, `qdsp`): `kg_async_fifo` с Gray-указателями, соотношением ширин и счётчиками rd/wr, плюс TIG/DATAPATHONLY на синхронизаторы. Обязательны тестбенч с разными частотами и проверка на железе. *`kg_async_fifo` с одной шириной сделан 2026-10-19 для tsconf (видео FT812 → пиксельный клок HDMI), тест `sim/mem/tb_async_fifo.v`; соотношение ширин и счётчик записи — когда понадобятся next186.*
 
 **D. PLL и DCM.** «MMCM» в `.xco` — просто метка, внутри сгенерированных `.v` стоят `PLL_BASE` / `DCM_SP`. Их можно заменить один к одному на `kg_pll` / `kg_dcm`, перенеся коэффициенты из текущих `.v`. Например, у alf `pll`: `DIVCLK=2, MULT=37, OUT=11/116/58/77`.
 
@@ -294,14 +294,32 @@ karabas-go-modules/
       - `kg_pll` перед BUFGMUX / BUFGCE: биты `BUFG_MASK` в 0 (иначе каскад BUFG → BUFGMUX вне выделенной трассировки, в Go стоял `CLOCK_DEDICATED_ROUTE = FALSE`). Из VHDL `BUFG_MASK` передаётся целым числом.
       - Клоки из логики и защёлки ищутся в «Clock Information» `.syr`. XST молча выбрасывает вторую ветку `elsif x'event` (у profi так терялся старший байт Nemo IDE).
       - Сети выходов PLL без BUFG называются по сигналу верхнего уровня (`U1/U1/pll_clk<0>`), а не `.../clkout<0>`: имена для TNM_NET проверять ngdbuild.
-   3. tsconf, baseconf;
-   4. test, pcxt, vt100 (в основном ipcore группы A);
-   5. alf, alf128, nes, rk86 (исправления линка + ipcore A, B, PLL);
-   6. menu (загрузчик, рисковать им в последнюю очередь);
-   7. spec256, sdram-test;
-   8. pdp2026 (PR автору);
-   9. next (VHDL top, своя раскладка, distributed RAM ZX Next с пометками `// karabas:`);
-   10. next186 (асимметричная память, async FIFO).
+   3. tsconf — *сделано 2026-10-19, ждёт проверки на железе* (ветка `kg-modules` ядра, сборка 26101917). На `kg_*`: `mcu` → `kg_mcu` (PS/2, XT, UART, RTC; matrix на Mini G, burst 32 МГц на Mini G), `soft_switches`, `cursor`, `overlay` → `kg_osd_overlay`, `dpram` / `fifo` / rom → `kg_sdpram` / `kg_fifo`, `pcm5102`, `dac` → `kg_sigma_delta_dac`, `pll` → `kg_pll`, HDMI → zhdmi из modules (на Mini / Mini G около 900 LUT больше прежнего кодера, решено оставить). `.xise` удалены, сборка через `src/Makefile`. Новый модуль `kg_async_fifo`. Один блок констрейнтов в трёх ucf: PERIOD на CLK_50MHZ, `TS_CLK_MCU` 32 МГц, FROM-TO DATAPATHONLY на асинхронных переходах (MCU_SCK, clk_8 FDC, FT_CLK, ESP32 I2S), SRAM 12 + 12 нс, свой PERIOD 64 МГц на пиксельный клок FT. Все констрейнты выполнены на трёх платах, на Mini / Mini G и во втором прогоне trce для режима ядра (`make <board>-coremode`).
+
+      | Плата | LUT master → после | Slices | Score с реальными констрейнтами, master → после |
+      |---|---|---|---|
+      | Go | 12 465 → 12 425 | 3 693 → 3 622 | 5,56 млн → 0 |
+      | Mini | 13 313 → 14 447 | 3 710 → 3 756 | 8,30 млн → 0 |
+      | Mini G | 13 424 → 14 452 | 3 756 → 3 756 | 12,80 млн → 0 |
+
+      Находки для остальных ядер (baseconf, menu, vt100 с тем же HDMI и FT812):
+      - `hdmi_pll` (FT812 на HDMI) не программировал DCM_CLKGEN: `fctl` отставал на такт, был уже, чем данные, и `-1` без размера в конкатенации занимал 32 бита. В FT-режимах пиксельный клок оставался прежним. У baseconf и menu такой же код.
+      - 5x клок DCM_SP на -2 (CLKFX до 333 МГц): FT-режимы на HDMI до 64 МГц, 72 и 80 МГц вне спецификации.
+      - Видео FT812 в пиксельный клок: частота та же (оба от clk_8), фаза неизвестна. Два регистра подряд склеивали биты двух пикселей, нужен `kg_async_fifo`. Вход берётся по спаду FT_CLK в IOB, запись в FIFO тоже по спаду: полпериода 80 МГц меньше трассы от IOB до LUT RAM.
+      - Пиксельный клок — BUFGMUX из clk_bus и DCM. В режиме ядра он примерно на 4 нс позже BUFG clk_bus, причину trce не показывает. Переходы clk_bus → пиксель выдаются по спаду clk_bus. Собственный PERIOD на выходе DCM_CLKGEN не убирает производный, поэтому режим ядра проверяется вторым прогоном trce с pcf без FT-констрейнтов (`pcf_core.py`, как `-ds80` у profi).
+      - `INST ... TNM` на BUFGMUX не поддерживается: TIG на селект через KEEP-сеть.
+      - MCU_SCK на Mini G шёл через IBUF по локальной трассировке, PAR не закрывал hold (−5 нс): IBUFG + BUFG. Не-клоковые нагрузки (мультиплексор SCK FT812) берутся с выхода IBUFG.
+      - BUFGCE на clk_bus (`U_BUFG` в tsconf.v) прятал соотношение clk_sys ↔ clk_bus: заменён на CE от `bus_ce.v`.
+      - `audio_samplerate.v` (в `zhdmi_top.v` modules) переключает `clk_audio` раз в `prescaler + 2` тактов, а строб даёт только на фронте: частота отсчётов fs/2. tsconf его больше не использует; ядрам с `zhdmi_top` (nanomig, profi) проверить на железе.
+      - Клоки из логики и защёлки: `zclk` в zports, триггеры IDE, SAA1099, /RAWREAD FDC, `palsel` / `hint_beg` (начальное значение, отличное от значения сброса). `volTable` ym2149 в «Clock Information» — ROM, артефакт отчёта XST.
+   4. baseconf;
+   5. test, pcxt, vt100 (в основном ipcore группы A);
+   6. alf, alf128, nes, rk86 (исправления линка + ipcore A, B, PLL);
+   7. menu (загрузчик, рисковать им в последнюю очередь);
+   8. spec256, sdram-test;
+   9. pdp2026 (PR автору);
+   10. next (VHDL top, своя раскладка, distributed RAM ZX Next с пометками `// karabas:`);
+   11. next186 (асимметричная память, async FIFO).
 5. **Документация.** Обновить CLAUDE.md nanomig (сейчас там «copies from profi»). Вести CHANGELOG, ставить теги `vX.Y`. Изменение портов — major-версия; совместимая обёртка живёт как минимум один major.
 
 ## 8. Риски
