@@ -16,9 +16,10 @@
 
  The position follows the syncs: the counters start at the leading edge of hsync / vsync (high
  active), their length picks the scale (lines under 500 clocks: a counter step per clock, under
- 1000: per 2, else per 4; frames under 400 / 800 lines likewise), H_OFFSET / V_OFFSET are in
- those steps. Popup: the characters twice as large. With the OSD on, the video under it is
- dimmed to 5 bits per colour.
+ H_DIV4_WIDTH: per 2, else per 4; frames under 400 / 800 lines likewise), H_OFFSET / V_OFFSET
+ are in those steps. Popup: the characters twice as large. With the OSD on, the video under it is
+ dimmed to 5 bits per colour. ALWAYS_ON: the OSD is on also with overlay and popup off (the boot
+ menu, whose screen is the OSD; its DEFAULT).
 
  overlay.vhd read the character and its font line in a process without a clock (latches); here
  the addresses are combinational (the block RAMs read every clock, the cell address stays during
@@ -30,7 +31,9 @@
 
 module kg_osd_overlay #(
 	parameter H_OFFSET = 120, // tsconf: 120 / 72
-	parameter V_OFFSET = 72
+	parameter V_OFFSET = 72,
+	parameter H_DIV4_WIDTH = 1000, // lines of this many clocks or more: a step per 4 (menu: 1200, 800 x 600)
+	parameter ALWAYS_ON = 0
 ) (
 	input wire clk,
 	input wire [23:0] rgb_i,
@@ -68,7 +71,7 @@ always @(posedge clk) begin
 		hcnt_i <= hcnt_i + 11'd1;
 end
 
-wire [10:0] hcnt = ((width < 500) ? hcnt_i : (width < 1000) ? { 1'b0, hcnt_i[10:1] } : { 2'b00, hcnt_i[10:2] }) - H_OFFSET;
+wire [10:0] hcnt = ((width < 500) ? hcnt_i : (width < H_DIV4_WIDTH) ? { 1'b0, hcnt_i[10:1] } : { 2'b00, hcnt_i[10:2] }) - H_OFFSET;
 wire [10:0] vcnt = ((height < 400) ? vcnt_i : (height < 800) ? { 1'b0, vcnt_i[10:1] } : { 2'b00, vcnt_i[10:2] }) - V_OFFSET;
 
 // ---------------- commands ----------------
@@ -142,7 +145,7 @@ kg_sdpram #(.DW(16), .AW(10)) u_vram(
 // paper2: the cells read; paper: the cells shown, a cell later
 wire paper2 = hcnt < PAPER_END_H && vcnt < PAPER_END_V;
 wire paper = hcnt >= 8 && hcnt < PAPER_END_H + 8 && vcnt < PAPER_END_V;
-wire video_on = osd_overlay | osd_popup;
+wire video_on = osd_overlay | osd_popup | (ALWAYS_ON != 0);
 
 // phase in a cell: popup 16 counter steps, else 8
 wire [3:0] phase = osd_popup ? hcnt[3:0] : { 1'b0, hcnt[2:0] };

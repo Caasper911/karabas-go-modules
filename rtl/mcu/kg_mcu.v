@@ -6,7 +6,7 @@
 
  The MCU of the board as mcu.vhd showed it to the cores, built from kg_mcu_link and the command
  decoders: the ports of mcu.vhd (karabas-go-core-nanomig, tsconf, and the file loader of rk86,
- spec256, alf, nes) with the same names, so a top changes the module name only. A core that wants
+ spec256, alf, nes; the ESP uart of menu) with the same names, so a top changes the module name only. A core that wants
  less can put kg_mcu_link and the decoders it needs in its top instead.
 
  Differences to the mcu.vhd of the cores (nanomig: none but CS_FILTER):
@@ -20,7 +20,7 @@
  - inputs have no default values (Verilog): tie the inputs of enabled features in the top;
  - no buffer ports.
 
- Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img.
+ Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img, esp.
 */
 
 module kg_mcu #(
@@ -38,7 +38,8 @@ module kg_mcu #(
 	parameter FILE_WR_EACH = 1,
 	parameter FILE_TO_ROM = 1,
 	parameter ENABLE_FT = 1,        // FT812 chip select passed through
-	parameter ENABLE_SD2 = 1        // second SD card chip select passed through
+	parameter ENABLE_SD2 = 1,       // second SD card chip select passed through
+	parameter ENABLE_ESP = 0        // the ESP8266 uart bridge (CMD_ESP_UART), see kg_mcu_esp
 ) (
 	input wire CLK,
 	input wire N_RESET,
@@ -160,16 +161,25 @@ module kg_mcu #(
 	output wire IMG_PHYS_WR,
 	output wire [15:0] IMG_PHYS,
 
+	// esp8266 uart bridge: a byte to the esp (one clock), a byte from it (held until the ack)
+	output wire [7:0] ESP_UART_TX_DATA,
+	output wire ESP_UART_TX_WR,
+	/* verilator lint_off UNUSEDSIGNAL */
+	input wire [7:0] ESP_UART_RX_DATA,
+	input wire ESP_UART_RX_WR,
+	/* verilator lint_on UNUSEDSIGNAL */
+	output wire ESP_UART_RX_ACK,
+
 	output wire BUSY
 );
 
 // ---------------- link ----------------
 
-localparam P = 8;
+localparam P = 9;
 wire [P-1:0] tx_req;
 wire [P*24-1:0] tx_data;
 /* verilator lint_off UNUSEDSIGNAL */
-wire [P-1:0] tx_grant;  // used by debug and img
+wire [P-1:0] tx_grant;  // used by debug, img and esp
 wire tx_full;
 /* verilator lint_on UNUSEDSIGNAL */
 
@@ -305,6 +315,25 @@ generate
 		assign IMG_PHYS = 16'd0;
 		assign tx_req[7] = 1'b0;
 		assign tx_data[7*24 +: 24] = 24'd0;
+	end
+endgenerate
+
+// esp8266 uart bridge: port 8
+generate
+	if (ENABLE_ESP) begin : kg_mcu_esp_on
+		kg_mcu_esp u_esp(
+			.clk(CLK), .rx_stb(rx_stb), .rx_cmd(rx_cmd), .rx_addr(rx_addr), .rx_data(rx_data),
+			.esp_tx_data(ESP_UART_TX_DATA), .esp_tx_wr(ESP_UART_TX_WR),
+			.esp_rx_data(ESP_UART_RX_DATA), .esp_rx_wr(ESP_UART_RX_WR), .esp_rx_ack(ESP_UART_RX_ACK),
+			.tx_req(tx_req[8]), .tx_data(tx_data[8*24 +: 24]), .tx_grant(tx_grant[8]), .tx_full(tx_full)
+		);
+	end
+	else begin : kg_mcu_esp_off
+		assign ESP_UART_TX_DATA = 8'd0;
+		assign ESP_UART_TX_WR = 1'b0;
+		assign ESP_UART_RX_ACK = 1'b0;
+		assign tx_req[8] = 1'b0;
+		assign tx_data[8*24 +: 24] = 24'd0;
 	end
 endgenerate
 

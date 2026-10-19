@@ -108,7 +108,7 @@ karabas-go-modules/
 
 **Слой 2: декодеры функций.** Каждый слушает шину кадров и, если ему нужно отвечать (`ctl` → CAPS, `rtc`, `uart`, `img`, `matrix` / peaks), подключается к TX. CAPS собирается автоматически из включённых `ENABLE_*`.
 
-**`kg_mcu` — совместимая обёртка** с параметрами `ENABLE_MOUSE`, `ENABLE_RTC`, `ENABLE_UART`, `ENABLE_IMG`, `ENABLE_IOCTL`, `ENABLE_FILELOAD`, `ENABLE_FT`, `ENABLE_SD2`, `ENABLE_PS2`, `ENABLE_DEBUG`, `ENABLE_MATRIX`, `ENABLE_BURST`.
+**`kg_mcu` — совместимая обёртка** с параметрами `ENABLE_MOUSE`, `ENABLE_RTC`, `ENABLE_UART`, `ENABLE_IMG`, `ENABLE_IOCTL`, `ENABLE_FILELOAD`, `ENABLE_FT`, `ENABLE_SD2`, `ENABLE_PS2`, `ENABLE_DEBUG`, `ENABLE_MATRIX`, `ENABLE_BURST`, `ENABLE_ESP` (menu).
 - Порты — надмножество портов nanomig и tsconf, имена те же. В top меняется только имя модуля.
 - Отдельные декодеры можно ставить и без обёртки.
 
@@ -317,7 +317,20 @@ karabas-go-modules/
    4. baseconf — *пропустить*: ядра baseconf ещё нет, то, что лежит в файловой системе (`karabas-go-core-baseconf`), пока игнорировать. Упоминания baseconf в этом плане относятся к нему же;
    5. test, pcxt, vt100 (в основном ipcore группы A);
    6. alf, alf128, nes, rk86 (исправления линка + ipcore A, B, PLL);
-   7. menu (загрузчик, рисковать им в последнюю очередь);
+   7. menu (загрузчик, рисковать им в последнюю очередь) — *сделано 2026-10-20* (сборка 26102001, ждёт проверки на железе). На `kg_*`: `mcu` → `kg_mcu` (FT, burst, новый декодер `kg_mcu_esp`, `ENABLE_ESP`), `soft_switches`, `overlay` → `kg_osd_overlay` (новые параметры `ALWAYS_ON`, `H_DIV4_WIDTH`), `fifo` → `kg_fifo`, `pcm5102`, `dac` → `kg_sigma_delta_dac`, `pll` → `kg_pll`, HDMI → zhdmi и `hdmi_top` / `hdmi_pll` из tsconf. `.xise` удалены, сборка через `src/Makefile`, опции map как у tsconf. Один блок констрейнтов в трёх ucf. Тесты против старого кода: `tb_eq_overlay`, `tb_mcu_esp`, `tb_hdmi_top`.
+
+      | Плата | LUT было → стало | Slices | Score с реальными констрейнтами, было → стало |
+      |---|---|---|---|
+      | Go | 593 → 567 | 253 → 206 | 0 → 0 |
+      | Mini | 1 827 → 2 641 | 707 → 981 | 107 381 (режим меню 485 457) → 0 / 0 |
+      | Mini G | 1 784 → 2 627 | 684 → 969 | не собран до конца → 0 / 0 |
+
+      Mini / Mini G больше на zhdmi (как у tsconf). Находки:
+      - ESP → MCU (`esp8266.vhd`): байт брался из FIFO в такт чтения, к MCU уходил предыдущий (на `OK\r\n` приходило `xx O K \r`); строб без подтверждения терял байты при полной очереди ответов (509 из 700). Теперь байт держится до ACK (`kg_mcu_esp`). UART 117,9 кбод вместо 115 200 (делитель для 40 МГц, clk_sys 40,91). CTS не срабатывал. TX FIFO 256 байт может переполниться (в firmware нет управления потоком) — не исправлено.
+      - `hdmi_pll` — тот же баг `fctl`, что у tsconf; `freq_counter.vhd` не брал частоту FT, сменившуюся при `ft_sel = 0` (`prev_sel`).
+      - Старые ucf: PERIOD 40 / 8 МГц при реальных 40,91 / 8,18, TIG на реальном пути `o_freq`. Комментарии PLL говорили 40 / 8 / 16 / 12 МГц.
+      - `kg_osd_overlay` при /2 даёт атрибут на два такта (один пиксель OSD) раньше символа, как `overlay.vhd` nanomig. Проверить во всех ядрах с /2.
+      - Mini: путь `audio_en_s` → сдвиговые регистры 5x zhdmi в режиме меню не сошёлся на 0,09 нс при MAP_T 1 (как у nanomig), MAP_T 2.
    8. spec256, sdram-test;
    9. pdp2026 (PR автору);
    10. next (VHDL top, своя раскладка, distributed RAM ZX Next с пометками `// karabas:`);

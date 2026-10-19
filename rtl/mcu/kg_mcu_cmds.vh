@@ -32,6 +32,7 @@ localparam [7:0] CMD_IOCTL_DATA   = 8'h53;
 localparam [7:0] CMD_IOCTL_EXT    = 8'h54;
 localparam [7:0] CMD_IOCTL_STATE  = 8'h55;
 localparam [7:0] CMD_CAPS         = 8'hF7; // both directions
+localparam [7:0] CMD_ESP_UART     = 8'hF8; // both directions
 localparam [7:0] CMD_HW_SETUP     = 8'hF9;
 localparam [7:0] CMD_RTC          = 8'hFA; // both directions
 localparam [7:0] CMD_UART         = 8'hFC; // both directions

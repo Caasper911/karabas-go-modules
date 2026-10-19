@@ -21,11 +21,11 @@ The reference versions are those of `karabas-go-core-nanomig` (sibling directory
 ## Layout (see docs/PLAN.md section 3)
 
 Now (old file -> its `kg_*` replacement):
-- `rtl/mcu`: `mcu.vhd` -> `kg_mcu` (same port names; built from `kg_mcu_link`, the transport with the reply queue and the chip select filter, and the decoders `kg_mcu_ctl`, `_hid`, `_loader`, `_rtc`, `_uart`, `_img`, `_debug` on its frame bus; command codes in `kg_mcu_cmds.vh`, which must match `src/config.h` of the firmware), `spi_slave.vhd` -> `kg_spi_slave`, `burst_rx.vhd` -> `kg_burst_rx`, `img_sdc.v`.
+- `rtl/mcu`: `mcu.vhd` -> `kg_mcu` (same port names; built from `kg_mcu_link`, the transport with the reply queue and the chip select filter, and the decoders `kg_mcu_ctl`, `_hid`, `_loader`, `_rtc`, `_uart`, `_img`, `_debug`, `_esp` (the ESP8266 uart of the menu, `ENABLE_ESP`) on its frame bus; command codes in `kg_mcu_cmds.vh`, which must match `src/config.h` of the firmware), `spi_slave.vhd` -> `kg_spi_slave`, `burst_rx.vhd` -> `kg_burst_rx`, `img_sdc.v`.
 - `rtl/mem`: `dpram.v` (-> `kg_tdpram` with one clock), `fifo.v` -> `kg_fifo`; `kg_async_fifo` (two clocks, Gray pointers); the coregen replacements `kg_spram`, `kg_sprom`, `kg_sdpram`, `kg_tdpram`, `kg_dist_sdpram`, `kg_dist_spram`.
 - `rtl/clk`: `kg_pll`, `kg_dcm`. `rtl/ctl`: `kg_soft_switches` (the `soft_switches.vhd` of the cores). `rtl/hid`: `kg_cursor` (their `cursor.vhd`).
 - `rtl/audio`: `pcm5102.v` -> `kg_pcm5102` (sends bit 0, see its header), `dac.vhd` -> `kg_sigma_delta_dac`, `audio_peaks.v`.
-- `rtl/video/hdmi`: `zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd` (third-party VHDL, kept). `rtl/video/osd`: `overlay.vhd` -> `kg_osd_overlay`, `pix_doubler.vhd` -> `kg_pix_doubler`.
+- `rtl/video/hdmi`: `zhdmi_top.v`, zhdmi, `hdmi_pll.v`, `dvi*.vhd` (third-party VHDL, kept). `rtl/video/osd`: `overlay.vhd` -> `kg_osd_overlay` (`ALWAYS_ON` and `H_DIV4_WIDTH` for the menu), `pix_doubler.vhd` -> `kg_pix_doubler`.
 - `sim/` (`lint`, `mem`, `audio`, `eq`, `mcu`, `ipcore_eq`, `run_all.sh`); `tools/coe2hex.py`.
 
 Planned:

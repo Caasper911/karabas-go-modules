@@ -6,7 +6,9 @@
 //       registers D sent and F0-FF not, no file loader;
 //   rk  rk86 / spec256: ioctl file loader on its own signals, a write per address change;
 //   alf alf / nes: the file commands 0C-0E;
-//   nm  nanomig: a full reply queue holds a file mounter word until there is room.
+//   nm  nanomig: a full reply queue holds a file mounter word until there is room;
+//   esp menu: the ESP8266 uart bridge, bytes both ways, a byte from the ESP held while the reply
+//       queue is full.
 // Also: the chip select filter (a short high spike in a frame; ts filters, rk does not), a frame
 // decoded once (MS_UPD and the scancode flags toggle once).
 // Ends with "tb_kg_mcu: N errors".
@@ -25,8 +27,8 @@ task fail(input [8*72-1:0] what);
 endtask
 
 reg cs_n = 1'b1, sck = 1'b0, mosi = 1'b0, burst_cs_n = 1'b1;
-reg [1:0] sel = 2'd0; // whose replies are read: 0 ts, 1 rk, 2 alf, 3 nm
-wire [3:0] miso;
+reg [2:0] sel = 3'd0; // whose replies are read: 0 ts, 1 rk, 2 alf, 3 nm, 4 esp
+wire [4:0] miso;
 wire miso_sel = miso[sel];
 
 // core side
@@ -83,6 +85,16 @@ kg_mcu #(.ENABLE_FILE(1), .FILE_CMDS(1), .FILE_WR_EACH(0), .FILE_TO_ROM(0)) alf(
 wire nm_ack;
 kg_mcu #(.BURST_MAX_MHZ(32), .ENABLE_IMG(1)) nm(`INPUTS(3), .IMG_Q_ACK(nm_ack));
 
+// menu: the ESP uart bridge, nothing that answers but CAPS
+reg [7:0] esp_rx_data = 8'h00;
+reg esp_rx_wr = 1'b0;
+wire [7:0] esp_tx_data;
+wire esp_tx_wr, esp_rx_ack, ts_esp_tx_wr;
+kg_mcu #(.ENABLE_RTC(0), .ENABLE_UART(0), .ENABLE_MATRIX(0), .ENABLE_FILE(0), .ENABLE_SD2(0), .ENABLE_ESP(1))
+	esp(`INPUTS(4), .ESP_UART_TX_DATA(esp_tx_data), .ESP_UART_TX_WR(esp_tx_wr),
+	.ESP_UART_RX_DATA(esp_rx_data), .ESP_UART_RX_WR(esp_rx_wr), .ESP_UART_RX_ACK(esp_rx_ack));
+assign ts_esp_tx_wr = ts.ESP_UART_TX_WR;
+
 // ---------------- mcu model ----------------
 
 task spi_byte(input [7:0] tx, output [7:0] rx);
@@ -99,7 +111,7 @@ task spi_byte(input [7:0] tx, output [7:0] rx);
 	end
 endtask
 
-reg [23:0] rxq [0:1023];
+reg [23:0] rxq [0:4095];
 integer rx_n = 0, rx_rd = 0;
 reg [7:0] rc, ra, rd;
 reg glitch = 1'b0; // a 50 ns high spike on cs_n in the middle of the second byte
@@ -213,6 +225,24 @@ end
 
 integer acks = 0;
 always @(posedge clk) if (nm_ack) acks = acks + 1;
+
+// esp: bytes to the ESP; the ESP side puts up esp_send bytes 0, 1, ... (+ esp_base), each held
+// until its ack, the next one in the clock of the ack
+reg [7:0] esp_log [0:15];
+integer esp_tx_n = 0, ts_esp_n = 0, esp_send = 0, esp_sent = 0, esp_acks_full = 0;
+reg [7:0] esp_base = 8'h00;
+reg esp_full_check = 1'b0;
+always @(posedge clk) begin
+	if (esp_tx_wr) begin esp_log[esp_tx_n % 16] = esp_tx_data; esp_tx_n = esp_tx_n + 1; end
+	if (ts_esp_tx_wr) ts_esp_n = ts_esp_n + 1;
+	if (esp_rx_ack && esp_full_check && esp.u_link.u_queue.count == 512) esp_acks_full = esp_acks_full + 1;
+end
+always @(negedge clk) begin
+	if (esp_rx_wr && esp_rx_ack)
+		esp_sent = esp_sent + 1;
+	esp_rx_wr = esp_sent < esp_send;
+	esp_rx_data = esp_base + esp_sent[7:0];
+end
 
 reg [39:0] rk_log [0:255], alf_log [0:255];
 integer rk_n = 0, alf_n = 0, rk_resets = 0, rk_romwrs = 0;
@@ -348,7 +378,40 @@ initial begin
 			$time, n1, rxq[n0 + n1], rx_n - n0);
 		errors = errors + 1;
 	end
-	sel = 2'd0;
+	sel = 3'd0;
+
+	// ---- menu: the ESP uart bridge ----
+	sel = 3'd4;
+	flush;
+	frame(8'hF8, 8'h00, 8'h41);
+	frame(8'hF8, 8'h00, 8'h0D);
+	if (esp_tx_n != 2 || esp_log[0] !== 8'h41 || esp_log[1] !== 8'h0D) fail("bytes to the ESP");
+	if (ts_esp_n != 0) fail("ESP bytes without ENABLE_ESP");
+	esp_base = 8'h30; esp_sent = 0; esp_send = 3;
+	expect_reply(24'hF8_00_30);
+	expect_reply(24'hF8_00_31);
+	expect_reply(24'hF8_00_32);
+	expect_no_reply;
+	// 600 bytes without a frame: the queue fills at 512 and the rest wait for room
+	esp_base = 8'h00; esp_sent = 0; esp_full_check = 1'b1; esp_send = 600;
+	repeat (2000) @(negedge clk);
+	if (esp.u_link.u_queue.count != 512 || esp_sent < 510 || esp_sent > 512) begin
+		$display("%t ERROR: esp: queue %0d words, %0d bytes sent while not read", $time,
+			esp.u_link.u_queue.count, esp_sent);
+		errors = errors + 1;
+	end
+	if (esp_acks_full != 0) fail("ESP byte acked while the queue was full");
+	n0 = rx_n;
+	for (i = 0; i < 620; i = i + 1) frame(8'hFF, 8'h00, 8'h00);
+	esp_full_check = 1'b0;
+	// out in order: a NOPE may be first in the queue, then the 600 bytes
+	n1 = 0;
+	while (n0 + n1 < rx_n && rxq[n0 + n1] === { 8'hF8, 8'h00, n1[7:0] }) n1 = n1 + 1;
+	if (n1 != 600 || rx_n != n0 + 600) begin
+		$display("%t ERROR: esp after the full queue: %0d bytes in order, %0d words in all", $time, n1, rx_n - n0);
+		errors = errors + 1;
+	end
+	sel = 3'd0;
 
 	$display("tb_kg_mcu: %0d errors", errors);
 	$finish;
