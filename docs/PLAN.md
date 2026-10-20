@@ -317,7 +317,7 @@ karabas-go-modules/
    4. baseconf — *пропустить*: ядра baseconf ещё нет, то, что лежит в файловой системе (`karabas-go-core-baseconf`), пока игнорировать. Упоминания baseconf в этом плане относятся к нему же;
    5. test, pcxt, vt100 (в основном ipcore группы A);
    6. alf, alf128, nes, rk86 (исправления линка + ipcore A, B, PLL);
-   7. menu (загрузчик, рисковать им в последнюю очередь) — *сделано 2026-10-20* (сборка 26102001, ждёт проверки на железе). На `kg_*`: `mcu` → `kg_mcu` (FT, burst, новый декодер `kg_mcu_esp`, `ENABLE_ESP`), `soft_switches`, `overlay` → `kg_osd_overlay` (новые параметры `ALWAYS_ON`, `H_DIV4_WIDTH`), `fifo` → `kg_fifo`, `pcm5102`, `dac` → `kg_sigma_delta_dac`, `pll` → `kg_pll`, HDMI → zhdmi и `hdmi_top` / `hdmi_pll` из tsconf. `.xise` удалены, сборка через `src/Makefile`, опции map как у tsconf. Один блок констрейнтов в трёх ucf. Тесты против старого кода: `tb_eq_overlay`, `tb_mcu_esp`, `tb_hdmi_top`.
+   7. menu (загрузчик, рисковать им в последнюю очередь) — *сделано 2026-10-20, проверено на железе Mini G* (сборка 26102001: FT812 на HDMI, звук, OSD по центру). На `kg_*`: `mcu` → `kg_mcu` (FT, burst, новый декодер `kg_mcu_esp`, `ENABLE_ESP`), `soft_switches`, `overlay` → `kg_osd_overlay` (новые параметры `ALWAYS_ON`, `H_DIV4_WIDTH`), `fifo` → `kg_fifo`, `pcm5102`, `dac` → `kg_sigma_delta_dac`, `pll` → `kg_pll`, HDMI → zhdmi и `hdmi_top` / `hdmi_pll` из tsconf. `.xise` удалены, сборка через `src/Makefile`, опции map как у tsconf. Один блок констрейнтов в трёх ucf. Тесты против старого кода: `tb_eq_overlay`, `tb_mcu_esp`, `tb_hdmi_top`.
 
       | Плата | LUT было → стало | Slices | Score с реальными констрейнтами, было → стало |
       |---|---|---|---|
