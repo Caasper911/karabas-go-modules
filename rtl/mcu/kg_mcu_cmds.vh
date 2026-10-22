@@ -35,6 +35,7 @@ localparam [7:0] CMD_CAPS         = 8'hF7; // both directions
 localparam [7:0] CMD_ESP_UART     = 8'hF8; // both directions
 localparam [7:0] CMD_HW_SETUP     = 8'hF9;
 localparam [7:0] CMD_RTC          = 8'hFA; // both directions
+localparam [7:0] CMD_FLASHBOOT    = 8'hFB; // fpga -> mcu: load the core in data[4:0] (next)
 localparam [7:0] CMD_UART         = 8'hFC; // both directions
 localparam [7:0] CMD_INIT_START   = 8'hFD;
 localparam [7:0] CMD_INIT_DONE    = 8'hFE;
