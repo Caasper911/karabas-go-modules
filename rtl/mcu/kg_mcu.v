@@ -6,7 +6,7 @@
 
  The MCU of the board as mcu.vhd showed it to the cores, built from kg_mcu_link and the command
  decoders: the ports of mcu.vhd (karabas-go-core-nanomig, tsconf, and the file loader of rk86,
- spec256, alf, nes; the ESP uart of menu) with the same names, so a top changes the module name only. A core that wants
+ spec256, alf, nes; the ESP uart of menu; the flashboot of next) with the same names, so a top changes the module name only. A core that wants
  less can put kg_mcu_link and the decoders it needs in its top instead.
 
  Differences to the mcu.vhd of the cores (nanomig: none but CS_FILTER):
@@ -20,7 +20,8 @@
  - inputs have no default values (Verilog): tie the inputs of enabled features in the top;
  - no buffer ports.
 
- Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img, esp.
+ Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img, esp,
+ flashboot.
 */
 
 module kg_mcu #(
@@ -39,7 +40,8 @@ module kg_mcu #(
 	parameter FILE_TO_ROM = 1,
 	parameter ENABLE_FT = 1,        // FT812 chip select passed through
 	parameter ENABLE_SD2 = 1,       // second SD card chip select passed through
-	parameter ENABLE_ESP = 0        // the ESP8266 uart bridge (CMD_ESP_UART), see kg_mcu_esp
+	parameter ENABLE_ESP = 0,       // the ESP8266 uart bridge (CMD_ESP_UART), see kg_mcu_esp
+	parameter ENABLE_FLASHBOOT = 0  // CMD_FLASHBOOT to the mcu (next: the reload of a core), see port 9
 ) (
 	input wire CLK,
 	input wire N_RESET,
@@ -170,16 +172,24 @@ module kg_mcu #(
 	/* verilator lint_on UNUSEDSIGNAL */
 	output wire ESP_UART_RX_ACK,
 
+	// flashboot: a rising FLASHBOOT_START asks the mcu to load the core FLASHBOOT_COREID
+	/* verilator lint_off UNUSEDSIGNAL */
+	input wire FLASHBOOT_START,
+	input wire [4:0] FLASHBOOT_COREID,
+	/* verilator lint_on UNUSEDSIGNAL */
+
 	output wire BUSY
 );
 
 // ---------------- link ----------------
 
-localparam P = 9;
+`include "kg_mcu_cmds.vh"
+
+localparam P = 10;
 wire [P-1:0] tx_req;
 wire [P*24-1:0] tx_data;
 /* verilator lint_off UNUSEDSIGNAL */
-wire [P-1:0] tx_grant;  // used by debug, img and esp
+wire [P-1:0] tx_grant;  // used by debug, img, esp and flashboot
 wire tx_full;
 /* verilator lint_on UNUSEDSIGNAL */
 
@@ -334,6 +344,29 @@ generate
 		assign ESP_UART_RX_ACK = 1'b0;
 		assign tx_req[8] = 1'b0;
 		assign tx_data[8*24 +: 24] = 24'd0;
+	end
+endgenerate
+
+// flashboot: port 9. The mcu.vhd of next put CMD_FLASHBOOT in the queue in every clock while
+// FLASHBOOT_START was high (and not busy), ahead of every other source, so the queue was full of
+// them until the mcu reloaded the fpga; one word does the same. A rising FLASHBOOT_START is kept
+// until the word goes in: not while BUSY (as mcu.vhd), not into a full queue.
+generate
+	if (ENABLE_FLASHBOOT) begin : kg_mcu_flashboot_on
+		reg fb_prev = 1'b0, fb_pend = 1'b0;
+		always @(posedge CLK) begin
+			fb_prev <= FLASHBOOT_START;
+			if (FLASHBOOT_START && !fb_prev)
+				fb_pend <= 1'b1;
+			else if (tx_grant[9])
+				fb_pend <= 1'b0;
+		end
+		assign tx_req[9] = fb_pend && !BUSY && !tx_full;
+		assign tx_data[9*24 +: 24] = { CMD_FLASHBOOT, 8'h00, 3'b000, FLASHBOOT_COREID };
+	end
+	else begin : kg_mcu_flashboot_off
+		assign tx_req[9] = 1'b0;
+		assign tx_data[9*24 +: 24] = 24'd0;
 	end
 endgenerate
 

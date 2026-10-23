@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-// kg_mcu.v beyond what mcu.vhd of nanomig has (tb_eq_mcu compares that part), iverilog. Four
+// kg_mcu.v beyond what mcu.vhd of nanomig has (tb_eq_mcu compares that part), iverilog. Six
 // instances on one spi bus, replies read from the one selected:
 //   ts  tsconf: ps/2 and xt scancodes, uart mode / dll / dlm, debug values, FT_RESET, rtc
 //       registers D sent and F0-FF not, no file loader;
@@ -8,7 +8,8 @@
 //   alf alf / nes: the file commands 0C-0E;
 //   nm  nanomig: a full reply queue holds a file mounter word until there is room;
 //   esp menu: the ESP8266 uart bridge, bytes both ways, a byte from the ESP held while the reply
-//       queue is full.
+//       queue is full;
+//   nx  next: flashboot, one word per rising FLASHBOOT_START, held while BUSY.
 // Also: the chip select filter (a short high spike in a frame; ts filters, rk does not), a frame
 // decoded once (MS_UPD and the scancode flags toggle once).
 // Ends with "tb_kg_mcu: N errors".
@@ -27,8 +28,8 @@ task fail(input [8*72-1:0] what);
 endtask
 
 reg cs_n = 1'b1, sck = 1'b0, mosi = 1'b0, burst_cs_n = 1'b1;
-reg [2:0] sel = 3'd0; // whose replies are read: 0 ts, 1 rk, 2 alf, 3 nm, 4 esp
-wire [4:0] miso;
+reg [2:0] sel = 3'd0; // whose replies are read: 0 ts, 1 rk, 2 alf, 3 nm, 4 esp, 5 nx
+wire [5:0] miso;
 wire miso_sel = miso[sel];
 
 // core side
@@ -41,6 +42,8 @@ reg matrix_cmd_wr = 1'b0;
 reg [15:0] debug_addr = 16'h0000, debug_data = 16'h0000;
 reg img_q_wr = 1'b0;
 reg [23:0] img_q_di = 24'h0;
+reg fb_start = 1'b0;
+reg [4:0] fb_coreid = 5'd0;
 
 `define INPUTS(i) \
 	.CLK(clk), .N_RESET(1'b1), \
@@ -51,7 +54,7 @@ reg [23:0] img_q_di = 24'h0;
 	.UART_DLM(uart_dlm), .UART_DLL(uart_dll), .UART_DLM_WR(uart_dlm_wr), .UART_DLL_WR(uart_dll_wr), \
 	.FT_MISO(1'b1), .SD2_MISO(1'b1), \
 	.MATRIX_CMD(matrix_cmd), .MATRIX_CMD_WR(matrix_cmd_wr), .DEBUG_ADDR(debug_addr), .DEBUG_DATA(debug_data), \
-	.IMG_Q_WR(img_q_wr), .IMG_Q_DI(img_q_di)
+	.IMG_Q_WR(img_q_wr), .IMG_Q_DI(img_q_di), .FLASHBOOT_START(fb_start), .FLASHBOOT_COREID(fb_coreid)
 
 // tsconf
 wire ts_ms_upd, ts_kb_upd, ts_xt_upd, ts_ft_spi, ts_ft_vga, ts_ft_reset, ts_busy;
@@ -94,6 +97,11 @@ kg_mcu #(.ENABLE_RTC(0), .ENABLE_UART(0), .ENABLE_MATRIX(0), .ENABLE_FILE(0), .E
 	esp(`INPUTS(4), .ESP_UART_TX_DATA(esp_tx_data), .ESP_UART_TX_WR(esp_tx_wr),
 	.ESP_UART_RX_DATA(esp_rx_data), .ESP_UART_RX_WR(esp_rx_wr), .ESP_UART_RX_ACK(esp_rx_ack));
 assign ts_esp_tx_wr = ts.ESP_UART_TX_WR;
+
+// next: flashboot, rtc, matrix
+wire nx_busy;
+kg_mcu #(.ENABLE_UART(0), .ENABLE_FILE(0), .ENABLE_FT(0), .ENABLE_SD2(0), .ENABLE_FLASHBOOT(1))
+	nx(`INPUTS(5), .BUSY(nx_busy));
 
 // ---------------- mcu model ----------------
 
@@ -412,6 +420,27 @@ initial begin
 		errors = errors + 1;
 	end
 	sel = 3'd0;
+
+	// ---- next: flashboot ----
+	// mcu.vhd of next put the word in the queue in every clock while FLASHBOOT_START was high
+	sel = 3'd5;
+	flush;
+	frame(8'hFD, 8'h00, 8'h00);                         // INIT_START: busy
+	if (nx_busy !== 1'b1) fail("next BUSY");
+	@(negedge clk); fb_coreid = 5'd1; fb_start = 1'b1;
+	expect_no_reply;                                    // not while busy
+	frame(8'hFE, 8'h00, 8'h00);                         // INIT_DONE
+	expect_reply(24'hFB_00_01);
+	expect_no_reply;                                    // one word, the start still high
+	@(negedge clk); fb_start = 1'b0; fb_coreid = 5'd17;
+	@(negedge clk); fb_start = 1'b1;
+	@(negedge clk); fb_start = 1'b0;                    // a one clock start
+	expect_reply(24'hFB_00_11);
+	expect_no_reply;
+	sel = 3'd0;
+	@(negedge clk); fb_start = 1'b1;
+	expect_no_reply;                                    // tsconf: no ENABLE_FLASHBOOT
+	@(negedge clk); fb_start = 1'b0;
 
 	$display("tb_kg_mcu: %0d errors", errors);
 	$finish;

@@ -11,6 +11,9 @@ HERE=$(pwd)
 M=$(cd ../.. && pwd)
 K=$(cd ../../.. && pwd)
 CORELIB=$XILINX/verilog/src/XilinxCoreLib
+# the coregen models of next: src/sim/ref/ipcore since it dropped ipcore_dir (as gen_models.py)
+NEXT=$K/karabas-go-core-next/src/sim/ref/ipcore
+[ -d "$NEXT" ] || NEXT=$K/karabas-go-core-next/src/ipcore_dir
 mkdir -p ../build/ipcore_eq
 cd ../build/ipcore_eq
 python3 -I "$HERE/gen_models.py" "$K"
@@ -25,6 +28,10 @@ verilog work "$K/karabas-go-core-next186/src/ipcore_dir/cache.v"
 verilog work "$K/karabas-go-core-rk86/src/ipcore_dir/font/font.v"
 verilog work "keyjoy_sdpram_64_6_ver.v"
 verilog work "spram_320_9_ver.v"
+verilog work "sdpram_128_8_ver.v"
+verilog work "sdpram_16_9_ver.v"
+verilog work "sdpram_64_9_ver.v"
+verilog work "sdpbram_16k_8_ver.v"
 verilog work "$M/rtl/mem/kg_spram.v"
 verilog work "$M/rtl/mem/kg_sprom.v"
 verilog work "$M/rtl/mem/kg_sdpram.v"
@@ -37,6 +44,7 @@ PRJ
 cat > clk.prj <<PRJ
 verilog work "$K/karabas-go-core-alf/src/ipcore_dir/pll.v"
 verilog work "$K/karabas-go-core-alf/src/ipcore_dir/pllx5.v"
+vhdl work "$NEXT/pll_midi.vhd"
 verilog work "$M/rtl/clk/kg_pll.v"
 verilog work "$M/rtl/clk/kg_dcm.v"
 verilog work "$HERE/tb_clk.v"
