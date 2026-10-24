@@ -16,9 +16,11 @@
  before. When the queue is empty, a NOPE word goes in, so the mcu never reads from an empty
  queue. tx_req[n] with tx_data[n*24 +: 24] asks to put a word in; one word goes in per clock,
  the lowest n first, and tx_grant[n] is high in the clock it is taken (combinational, so a
- source can keep its request up until then). A request that is not granted in its clock is not
- kept: one-clock strobes of two sources in the same clock lose the second (as mcu.vhd). tx_full:
- the queue cannot take a word (a source that must not lose one waits for it).
+ source can keep its request up until then). Grants reserve queue space, including the pending
+ registered write; no grant is issued during reset or when there is no room. A request that is
+ not granted in its clock is not kept: one-clock strobes of two sources in the same clock lose
+ the second (as mcu.vhd). tx_full reports FIFO full; reliable senders hold their request until
+ tx_grant, which also accounts for the pending write.
  CMD_CAPS 00 is answered here, before all ports: bursts (bit 0), MCU_BURST_READY driven (bit 1),
  and the highest burst sck BURST_MAX_MHZ (0 = the normal link clock).
 
@@ -125,11 +127,15 @@ assign burst_ready = 1'b1;
 reg q_rd = 1'b0, q_wr = 1'b0;
 reg [23:0] q_din = 24'd0;
 wire q_empty;
+wire [9:0] q_count;
+// q_wr is a write already reserved for this edge. Do not promise its last
+// slot to another sender: the newly granted word is written one clock later.
+wire can_accept = !reset && !tx_full && !(q_count == 10'd511 && q_wr);
 
 kg_fifo #(.DW(24), .AW(9)) u_queue(
 	.clk(clk), .reset(reset),
 	.wr(q_wr), .din(q_din), .full(tx_full),
-	.rd(q_rd), .dout(q_dout), .empty(q_empty), .count()
+	.rd(q_rd), .dout(q_dout), .empty(q_empty), .count(q_count)
 );
 
 // the word for the next frame: one per frame. It is in the slave about 7 clocks after the frame;
@@ -149,7 +155,7 @@ integer i;
 reg found;
 always @(*) begin
 	tx_grant = {TX_PORTS{1'b0}};
-	found = caps_pend;
+	found = caps_pend || !can_accept;
 	for (i = 0; i < TX_PORTS; i = i + 1)
 		if (tx_req[i] && !found) begin
 			tx_grant[i] = 1'b1;
@@ -162,20 +168,24 @@ always @(posedge clk) begin
 	q_wr <= 1'b0;
 	if (caps_q)
 		caps_pend <= 1'b1;
-	if (caps_pend) begin
+	if (caps_pend && can_accept) begin
 		q_wr <= 1'b1;
 		q_din <= { CMD_CAPS, CAPS, CAPS_MAX_MHZ };
 		caps_pend <= caps_q; // a query in this clock is answered next
 	end
-	else if (|tx_req) begin
+	else if (|tx_grant) begin
 		q_wr <= 1'b1;
 		for (j = 0; j < TX_PORTS; j = j + 1)
 			if (tx_grant[j])
 				q_din <= tx_data[j*24 +: 24];
 	end
-	else if (q_empty) begin
+	else if (q_empty && can_accept) begin
 		q_wr <= 1'b1;
 		q_din <= { CMD_NOPE, 16'h0000 };
+	end
+	if (reset) begin
+		q_wr <= 1'b0;
+		caps_pend <= 1'b0;
 	end
 end
 

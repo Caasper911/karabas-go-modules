@@ -18,6 +18,7 @@ localparam [7:0] CMD_FILEBANK     = 8'h0C;
 localparam [7:0] CMD_FILEDATA     = 8'h0D;
 localparam [7:0] CMD_FILELOADER   = 8'h0E;
 localparam [7:0] CMD_OSD          = 8'h20;
+localparam [7:0] CMD_PRINTER_STATUS = 8'h14; // both directions; data[7] is BUSY
 localparam [7:0] CMD_IMG_SLOT     = 8'h40;
 localparam [7:0] CMD_IMG_SIZE     = 8'h41;
 localparam [7:0] CMD_IMG_LBA      = 8'h42; // both directions
@@ -40,6 +41,7 @@ localparam [7:0] CMD_INIT_DONE    = 8'hFE;
 localparam [7:0] CMD_NOPE         = 8'hFF; // both directions
 
 // fpga -> mcu
+localparam [7:0] CMD_PRINTER_DATA  = 8'h13; // 13 00 xx: one raw printer byte
 localparam [7:0] CMD_DEBUG_ADDR    = 8'h30;
 localparam [7:0] CMD_DEBUG_DATA    = 8'h31;
 localparam [7:0] CMD_AUDIO_PEAKS_L = 8'h70;

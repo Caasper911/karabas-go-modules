@@ -20,7 +20,7 @@
  - inputs have no default values (Verilog): tie the inputs of enabled features in the top;
  - no buffer ports.
 
- Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img.
+ Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img, printer.
 */
 
 module kg_mcu #(
@@ -38,7 +38,8 @@ module kg_mcu #(
 	parameter FILE_WR_EACH = 1,
 	parameter FILE_TO_ROM = 1,
 	parameter ENABLE_FT = 1,        // FT812 chip select passed through
-	parameter ENABLE_SD2 = 1        // second SD card chip select passed through
+	parameter ENABLE_SD2 = 1,       // second SD card chip select passed through
+	parameter ENABLE_ZXLPRINT3 = 0  // ZX LPRINT III printer transport
 ) (
 	input wire CLK,
 	input wire N_RESET,
@@ -160,12 +161,20 @@ module kg_mcu #(
 	output wire IMG_PHYS_WR,
 	output wire [15:0] IMG_PHYS,
 
-	output wire BUSY
+	output wire BUSY,
+
+	// ZX LPRINT III, all signals in the CLK domain.
+	input wire ZXLPRINT3_RESET,
+	input wire [7:0] ZXLPRINT3_DATA,
+	input wire ZXLPRINT3_WR,
+	output wire ZXLPRINT3_BUSY,
+	output wire [7:0] ZXLPRINT3_STATUS,
+	output wire ZXLPRINT3_STATUS_VALID
 );
 
 // ---------------- link ----------------
 
-localparam P = 8;
+localparam P = 9;
 wire [P-1:0] tx_req;
 wire [P*24-1:0] tx_data;
 /* verilator lint_off UNUSEDSIGNAL */
@@ -305,6 +314,27 @@ generate
 		assign IMG_PHYS = 16'd0;
 		assign tx_req[7] = 1'b0;
 		assign tx_data[7*24 +: 24] = 24'd0;
+	end
+endgenerate
+
+// printer: port 8
+generate
+	if (ENABLE_ZXLPRINT3) begin : kg_zxlprint3_on
+		kg_zxlprint3 u_printer(
+			.clk(CLK), .reset(~N_RESET | ZXLPRINT3_RESET),
+			.rx_stb(rx_stb), .rx_cmd(rx_cmd), .rx_addr(rx_addr), .rx_data(rx_data),
+			.printer_data(ZXLPRINT3_DATA), .printer_wr(ZXLPRINT3_WR),
+			.printer_busy(ZXLPRINT3_BUSY), .printer_status(ZXLPRINT3_STATUS),
+			.printer_status_valid(ZXLPRINT3_STATUS_VALID),
+			.tx_req(tx_req[8]), .tx_data(tx_data[8*24 +: 24]), .tx_grant(tx_grant[8])
+		);
+	end
+	else begin : kg_zxlprint3_off
+		assign ZXLPRINT3_BUSY = 1'b1;
+		assign ZXLPRINT3_STATUS = 8'h80;
+		assign ZXLPRINT3_STATUS_VALID = 1'b0;
+		assign tx_req[8] = 1'b0;
+		assign tx_data[8*24 +: 24] = 24'd0;
 	end
 endgenerate
 
