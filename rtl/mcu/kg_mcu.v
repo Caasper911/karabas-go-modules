@@ -6,7 +6,7 @@
 
  The MCU of the board as mcu.vhd showed it to the cores, built from kg_mcu_link and the command
  decoders: the ports of mcu.vhd (karabas-go-core-nanomig, tsconf, and the file loader of rk86,
- spec256, alf, nes) with the same names, so a top changes the module name only. A core that wants
+ spec256, alf, nes; the ESP uart of menu; the flashboot of next) with the same names, so a top changes the module name only. A core that wants
  less can put kg_mcu_link and the decoders it needs in its top instead.
 
  Differences to the mcu.vhd of the cores (nanomig: none but CS_FILTER):
@@ -21,6 +21,8 @@
  - no buffer ports.
 
  Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img, printer.
+ Transmit priority: CAPS, uart byte, dll, dlm, rtc, matrix, debug addr, debug data, img, esp,
+ flashboot.
 */
 
 module kg_mcu #(
@@ -40,6 +42,8 @@ module kg_mcu #(
 	parameter ENABLE_FT = 1,        // FT812 chip select passed through
 	parameter ENABLE_SD2 = 1,       // second SD card chip select passed through
 	parameter ENABLE_ZXLPRINT3 = 0  // ZX LPRINT III printer transport
+	parameter ENABLE_ESP = 0,       // the ESP8266 uart bridge (CMD_ESP_UART), see kg_mcu_esp
+	parameter ENABLE_FLASHBOOT = 0  // CMD_FLASHBOOT to the mcu (next: the reload of a core), see port 9
 ) (
 	input wire CLK,
 	input wire N_RESET,
@@ -170,15 +174,33 @@ module kg_mcu #(
 	output wire ZXLPRINT3_BUSY,
 	output wire [7:0] ZXLPRINT3_STATUS,
 	output wire ZXLPRINT3_STATUS_VALID
+	// esp8266 uart bridge: a byte to the esp (one clock), a byte from it (held until the ack)
+	output wire [7:0] ESP_UART_TX_DATA,
+	output wire ESP_UART_TX_WR,
+	/* verilator lint_off UNUSEDSIGNAL */
+	input wire [7:0] ESP_UART_RX_DATA,
+	input wire ESP_UART_RX_WR,
+	/* verilator lint_on UNUSEDSIGNAL */
+	output wire ESP_UART_RX_ACK,
+
+	// flashboot: a rising FLASHBOOT_START asks the mcu to load the core FLASHBOOT_COREID
+	/* verilator lint_off UNUSEDSIGNAL */
+	input wire FLASHBOOT_START,
+	input wire [4:0] FLASHBOOT_COREID,
+	/* verilator lint_on UNUSEDSIGNAL */
+
+	output wire BUSY
 );
 
 // ---------------- link ----------------
 
-localparam P = 9;
+`include "kg_mcu_cmds.vh"
+
+localparam P = 10;
 wire [P-1:0] tx_req;
 wire [P*24-1:0] tx_data;
 /* verilator lint_off UNUSEDSIGNAL */
-wire [P-1:0] tx_grant;  // used by debug and img
+wire [P-1:0] tx_grant;  // used by debug, img, esp and flashboot
 wire tx_full;
 /* verilator lint_on UNUSEDSIGNAL */
 
@@ -317,7 +339,49 @@ generate
 	end
 endgenerate
 
-// printer: port 8
+// esp8266 uart bridge: port 8
+generate
+	if (ENABLE_ESP) begin : kg_mcu_esp_on
+		kg_mcu_esp u_esp(
+			.clk(CLK), .rx_stb(rx_stb), .rx_cmd(rx_cmd), .rx_addr(rx_addr), .rx_data(rx_data),
+			.esp_tx_data(ESP_UART_TX_DATA), .esp_tx_wr(ESP_UART_TX_WR),
+			.esp_rx_data(ESP_UART_RX_DATA), .esp_rx_wr(ESP_UART_RX_WR), .esp_rx_ack(ESP_UART_RX_ACK),
+			.tx_req(tx_req[8]), .tx_data(tx_data[8*24 +: 24]), .tx_grant(tx_grant[8]), .tx_full(tx_full)
+		);
+	end
+	else begin : kg_mcu_esp_off
+		assign ESP_UART_TX_DATA = 8'd0;
+		assign ESP_UART_TX_WR = 1'b0;
+		assign ESP_UART_RX_ACK = 1'b0;
+		assign tx_req[8] = 1'b0;
+		assign tx_data[8*24 +: 24] = 24'd0;
+	end
+endgenerate
+
+// flashboot: port 9. The mcu.vhd of next put CMD_FLASHBOOT in the queue in every clock while
+// FLASHBOOT_START was high (and not busy), ahead of every other source, so the queue was full of
+// them until the mcu reloaded the fpga; one word does the same. A rising FLASHBOOT_START is kept
+// until the word goes in: not while BUSY (as mcu.vhd), not into a full queue.
+generate
+	if (ENABLE_FLASHBOOT) begin : kg_mcu_flashboot_on
+		reg fb_prev = 1'b0, fb_pend = 1'b0;
+		always @(posedge CLK) begin
+			fb_prev <= FLASHBOOT_START;
+			if (FLASHBOOT_START && !fb_prev)
+				fb_pend <= 1'b1;
+			else if (tx_grant[9])
+				fb_pend <= 1'b0;
+		end
+		assign tx_req[9] = fb_pend && !BUSY && !tx_full;
+		assign tx_data[9*24 +: 24] = { CMD_FLASHBOOT, 8'h00, 3'b000, FLASHBOOT_COREID };
+	end
+	else begin : kg_mcu_flashboot_off
+		assign tx_req[9] = 1'b0;
+		assign tx_data[9*24 +: 24] = 24'd0;
+	end
+endgenerate
+
+// printer: port 11
 generate
 	if (ENABLE_ZXLPRINT3) begin : kg_zxlprint3_on
 		kg_zxlprint3 u_printer(
@@ -326,15 +390,15 @@ generate
 			.printer_data(ZXLPRINT3_DATA), .printer_wr(ZXLPRINT3_WR),
 			.printer_busy(ZXLPRINT3_BUSY), .printer_status(ZXLPRINT3_STATUS),
 			.printer_status_valid(ZXLPRINT3_STATUS_VALID),
-			.tx_req(tx_req[8]), .tx_data(tx_data[8*24 +: 24]), .tx_grant(tx_grant[8])
+			.tx_req(tx_req[11]), .tx_data(tx_data[11*24 +: 24]), .tx_grant(tx_grant[11])
 		);
 	end
 	else begin : kg_zxlprint3_off
 		assign ZXLPRINT3_BUSY = 1'b1;
 		assign ZXLPRINT3_STATUS = 8'h80;
 		assign ZXLPRINT3_STATUS_VALID = 1'b0;
-		assign tx_req[8] = 1'b0;
-		assign tx_data[8*24 +: 24] = 24'd0;
+		assign tx_req[11] = 1'b0;
+		assign tx_data[11*24 +: 24] = 24'd0;
 	end
 endgenerate
 

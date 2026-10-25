@@ -54,6 +54,22 @@ wire [8:0] dsp_c, dsp_k;
 spram_320_9 c_dsp (.clk(clk), .we(we), .a(a[8:0]), .d(d[8:0]), .spo(dsp_c));
 kg_dist_spram #(.DW(9), .AW(9), .DEPTH(320)) k_dsp (.clk(clk), .we(we), .a(a[8:0]), .d(d[8:0]), .spo(dsp_k));
 
+// sdpram_128_8, sdpram_16_9, sdpram_64_9 (next): distributed SDP, no init
+wire [7:0] s128_c, s128_k;
+wire [8:0] s16_c, s16_k, s64_c, s64_k;
+sdpram_128_8 c_s128 (.clk(clk), .we(we), .a(a[6:0]), .d(d[7:0]), .dpra(b[6:0]), .dpo(s128_c));
+kg_dist_sdpram #(.DW(8), .AW(7)) k_s128 (.clk(clk), .we(we), .a(a[6:0]), .d(d[7:0]), .spo(), .dpra(b[6:0]), .dpo(s128_k));
+sdpram_16_9 c_s16 (.clk(clk), .we(we), .a(a[3:0]), .d(d[8:0]), .dpra(b[3:0]), .dpo(s16_c));
+kg_dist_sdpram #(.DW(9), .AW(4)) k_s16 (.clk(clk), .we(we), .a(a[3:0]), .d(d[8:0]), .spo(), .dpra(b[3:0]), .dpo(s16_k));
+sdpram_64_9 c_s64 (.clk(clk), .we(we), .a(a[5:0]), .d(d[8:0]), .dpra(b[5:0]), .dpo(s64_c));
+kg_dist_sdpram #(.DW(9), .AW(6)) k_s64 (.clk(clk), .we(we), .a(a[5:0]), .d(d[8:0]), .spo(), .dpra(b[5:0]), .dpo(s64_k));
+
+// sdpbram_16k_8 (next sprite patterns): block SDP 16Kx8 with enb, default data E3
+wire [7:0] pat_c, pat_k;
+sdpbram_16k_8 c_pat (.clka(clk), .wea(we), .addra(a[13:0]), .dina(d[7:0]), .clkb(clk), .enb(enb), .addrb(b[13:0]), .doutb(pat_c));
+kg_sdpram #(.DW(8), .AW(14), .INIT_FILE("e3.hex")) k_pat (.clka(clk), .wea(we), .addra(a[13:0]), .dina(d[7:0]),
+	.clkb(clk), .enb(enb), .addrb(b[13:0]), .doutb(pat_k));
+
 task check;
 	input [255:0] name;
 	input [31:0] c, k;
@@ -72,8 +88,8 @@ initial begin
 	repeat (4) @(posedge clk);
 	// first pass reads the init contents only
 	for (i = 0; i < 64; i = i + 1) begin
-		@(negedge clk); a = i; b = 63 - i; en = 1; enb = 1;
-		@(negedge clk); check("rom", rom_c, rom_k); check("keyjoy", kj_c, kj_k);
+		@(negedge clk); a = i; b = 63 - i + (i[0] ? 16000 : 0); en = 1; enb = 1;
+		@(negedge clk); check("rom", rom_c, rom_k); check("keyjoy", kj_c, kj_k); check("pattern init", pat_c, pat_k);
 	end
 	for (i = 0; i < 40000; i = i + 1) begin
 		@(negedge clk);
@@ -86,6 +102,7 @@ initial begin
 			check("font", rom_c, rom_k);
 			check("keyjoy", kj_c, kj_k);
 			if (a[8:0] < 320) check("spram_320_9", dsp_c, dsp_k);
+			check("sdpbram_16k_8", pat_c, pat_k);
 		end
 		en = ($random & 7) != 0; enb = ($random & 7) != 0;
 		we = ($random & 3) == 0; we2 = ($random & 3) == 0;
@@ -99,6 +116,9 @@ initial begin
 		@(posedge clk); #1;
 		if (a[8:0] < 320) check("spram_320_9 async", dsp_c, dsp_k);
 		check("keyjoy async", kj_c, kj_k);
+		check("sdpram_128_8 async", s128_c, s128_k);
+		check("sdpram_16_9 async", s16_c, s16_k);
+		check("sdpram_64_9 async", s64_c, s64_k);
 	end
 	$display("tb_mem: %0d checks, %0d errors", checks, errors);
 	$finish;
